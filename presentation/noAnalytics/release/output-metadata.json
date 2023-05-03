@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "artifactType": {
+    "type": "APK",
+    "kind": "Directory"
+  },
+  "applicationId": "com.moez.QKSMS",
+  "variantName": "noAnalyticsRelease",
+  "elements": [
+    {
+      "type": "SINGLE",
+      "filters": [],
+      "versionCode": 2218,
+      "versionName": "3.9.4",
+      "outputFile": "QKSMS-v3.9.4-noAnalytics-release.apk"
+    }
+  ]
+}

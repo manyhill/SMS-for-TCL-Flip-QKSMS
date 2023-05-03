@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Button focused state -->
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="#acabab" />
+        </shape>
+    </item>
+
+    <!-- Button non-focused state -->
+    <item android:state_focused="false">
+        <shape>
+            <solid android:color="@color/white" />
+        </shape>
+    </item>
+</selector>
