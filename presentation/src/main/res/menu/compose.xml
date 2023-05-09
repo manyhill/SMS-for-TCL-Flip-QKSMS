@@ -97,5 +97,12 @@
         android:visible="false"
         app:showAsAction="never" />
 
+  <item
+        android:id="@+id/save"
+        android:icon="@drawable/ic_clear_black_24dp"
+        android:title="@string/button_save"
+        android:visible="false"
+        app:showAsAction="never" />
+
 
 </menu>

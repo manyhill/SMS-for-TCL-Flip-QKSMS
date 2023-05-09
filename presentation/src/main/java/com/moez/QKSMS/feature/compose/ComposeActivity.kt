@@ -33,7 +33,12 @@ import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.text.format.DateFormat
-import android.view.*
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.Menu
+import android.view.MenuItem
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.PopupMenu
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
@@ -45,13 +50,22 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.flexbox.FlexboxLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
-import com.jakewharton.rxbinding2.view.focusChanges
 import com.jakewharton.rxbinding2.widget.textChanges
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkThemedActivity
 import com.moez.QKSMS.common.util.DateFormatter
-import com.moez.QKSMS.common.util.extensions.*
+import com.moez.QKSMS.common.util.extensions.autoScrollToStart
+import com.moez.QKSMS.common.util.extensions.hideKeyboard
+import com.moez.QKSMS.common.util.extensions.makeToast
+import com.moez.QKSMS.common.util.extensions.resolveThemeColor
+import com.moez.QKSMS.common.util.extensions.scrapViews
+import com.moez.QKSMS.common.util.extensions.setBackgroundTint
+import com.moez.QKSMS.common.util.extensions.setLastItemFocusedListener
+import com.moez.QKSMS.common.util.extensions.setLastItemVisibleListener
+import com.moez.QKSMS.common.util.extensions.setTint
+import com.moez.QKSMS.common.util.extensions.setVisible
+import com.moez.QKSMS.common.util.extensions.showKeyboard
 import com.moez.QKSMS.feature.compose.editing.ChipsAdapter
 import com.moez.QKSMS.feature.contacts.ContactsActivity
 import com.moez.QKSMS.model.Attachment
@@ -62,9 +76,43 @@ import dagger.android.AndroidInjection
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
-import kotlinx.android.synthetic.main.compose_activity.*
+import kotlinx.android.synthetic.main.compose_activity.attach
+import kotlinx.android.synthetic.main.compose_activity.attach_tv
+import kotlinx.android.synthetic.main.compose_activity.attachingBackground
+import kotlinx.android.synthetic.main.compose_activity.attachments
+import kotlinx.android.synthetic.main.compose_activity.camera
+import kotlinx.android.synthetic.main.compose_activity.cameraLabel
+import kotlinx.android.synthetic.main.compose_activity.chips
+import kotlinx.android.synthetic.main.compose_activity.composeBar
+import kotlinx.android.synthetic.main.compose_activity.contact
+import kotlinx.android.synthetic.main.compose_activity.contactLabel
+import kotlinx.android.synthetic.main.compose_activity.contentView
+import kotlinx.android.synthetic.main.compose_activity.counter
+import kotlinx.android.synthetic.main.compose_activity.gallery
+import kotlinx.android.synthetic.main.compose_activity.galleryLabel
+import kotlinx.android.synthetic.main.compose_activity.loading
+import kotlinx.android.synthetic.main.compose_activity.message
+import kotlinx.android.synthetic.main.compose_activity.messageBackground
+import kotlinx.android.synthetic.main.compose_activity.messageList
+import kotlinx.android.synthetic.main.compose_activity.messagesEmpty
+import kotlinx.android.synthetic.main.compose_activity.schedule
+import kotlinx.android.synthetic.main.compose_activity.scheduleLabel
+import kotlinx.android.synthetic.main.compose_activity.scheduledCancel
+import kotlinx.android.synthetic.main.compose_activity.scheduledGroup
+import kotlinx.android.synthetic.main.compose_activity.scheduledTime
+import kotlinx.android.synthetic.main.compose_activity.sendAsGroup
+import kotlinx.android.synthetic.main.compose_activity.sendAsGroupBackground
+import kotlinx.android.synthetic.main.compose_activity.sendAsGroupSwitch
+import kotlinx.android.synthetic.main.compose_activity.send_tv
+import kotlinx.android.synthetic.main.compose_activity.sim
+import kotlinx.android.synthetic.main.compose_activity.simIndex
+import kotlinx.android.synthetic.main.compose_activity.toolbar
+import kotlinx.android.synthetic.main.compose_activity.toolbarSubtitle
+import kotlinx.android.synthetic.main.compose_activity.toolbarTitle
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 class ComposeActivity : QkThemedActivity(), ComposeView {
@@ -161,7 +209,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         viewModel.bindView(this)
 
         initClicks()
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
 
 
 
@@ -256,6 +304,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
                 state.conversationtitle
             }
+
             state.query.isNotEmpty() -> state.query
             else -> state.conversationtitle
         }
@@ -369,10 +418,10 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         val calendar = Calendar.getInstance()
         DatePickerDialog(
             this,
-            DatePickerDialog.OnDateSetListener { _, year, month, day ->
+            { _, year, month, day ->
                 TimePickerDialog(
                     this,
-                    TimePickerDialog.OnTimeSetListener { _, hour, minute ->
+                    { _, hour, minute ->
                         calendar.set(Calendar.YEAR, year)
                         calendar.set(Calendar.MONTH, month)
                         calendar.set(Calendar.DAY_OF_MONTH, day)
@@ -493,9 +542,11 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?.let { serializable -> serializable as? HashMap<String, String?> }
                     ?: hashMapOf())
             }
+
             requestCode == TakePhotoRequestCode && resultCode == Activity.RESULT_OK -> {
                 cameraDestination?.let(attachmentSelectedIntent::onNext)
             }
+
             requestCode == AttachPhotoRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.clipData?.itemCount?.let { count -> 0 until count }
                     ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
@@ -503,9 +554,11 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     attachmentSelectedIntent::onNext
                 )
             }
+
             requestCode == AttachContactRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.data?.let(contactSelectedIntent::onNext)
             }
+
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
     }
@@ -530,10 +583,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 attach_tv.performClick()
                 true
             }
+
             48 -> {
                 send_tv.performClick()
                 true
             }
+
             else -> super.onKeyUp(keyCode, event)
         }
     }
@@ -546,9 +601,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                         (messageList.layoutManager as LinearLayoutManager).let {
                             val last = it.findLastVisibleItemPosition()
                             val first = it.findFirstVisibleItemPosition()
-                            if (first != RecyclerView.NO_POSITION && last != RecyclerView.NO_POSITION
-                                && last - first > 0
-                            ) {
+                            if (first != RecyclerView.NO_POSITION && last != RecyclerView.NO_POSITION && last - first > 0) {
                                 super.onKeyDown(keyCode, event)
                             } else {
                                 messageList.smoothScrollBy(0, messageList.height - 16)
@@ -559,14 +612,13 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                         super.onKeyDown(keyCode, event)
                     }
                 }
+
                 KeyEvent.KEYCODE_DPAD_UP -> {
                     if (messageList.canScrollVertically(-1)) {
                         (messageList.layoutManager as LinearLayoutManager).let {
                             val last = it.findLastVisibleItemPosition()
                             val first = it.findFirstVisibleItemPosition()
-                            if (first != RecyclerView.NO_POSITION && last != RecyclerView.NO_POSITION
-                                && last - first > 0
-                            ) {
+                            if (first != RecyclerView.NO_POSITION && last != RecyclerView.NO_POSITION && last - first > 0) {
                                 super.onKeyDown(keyCode, event)
                             } else {
                                 messageList.smoothScrollBy(0, 16 - messageList.height)
@@ -577,6 +629,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                         super.onKeyDown(keyCode, event)
                     }
                 }
+
                 else -> super.onKeyDown(keyCode, event)
             }
         } else {
@@ -600,6 +653,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     }
 
     private fun showOptionsDialog() {
+
 
         val listener = object : ComposeOptionsDialog.OnComposeOptionsDialogItemClickListener {
             override fun onCopyMessageClicked() {
@@ -638,6 +692,10 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
             override fun onMessageCallClicked() {
                 optionsItemIntent.onNext(R.id.call)
+            }
+
+            override fun onSaveClicked() {
+                optionsItemIntent.onNext(R.id.save)
             }
 
         }

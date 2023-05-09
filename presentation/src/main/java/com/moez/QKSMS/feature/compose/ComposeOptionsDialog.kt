@@ -7,12 +7,14 @@ import android.widget.ArrayAdapter
 import android.widget.ListView
 import com.moez.QKSMS.R
 
-class ComposeOptionsDialog constructor(context: Context, private val listener: OnComposeOptionsDialogItemClickListener) :
-    Dialog(context) {
+class ComposeOptionsDialog constructor(
+    context: Context,
+    private val listener: OnComposeOptionsDialogItemClickListener
+) : Dialog(context) {
 
 
     lateinit var listView: ListView
-    var isClickDismissed=false
+    var isClickDismissed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,8 +24,15 @@ class ComposeOptionsDialog constructor(context: Context, private val listener: O
 
         listView = findViewById(R.id.option_dialog_list_view)
 
-        val items =
-            arrayOf("Copy Message Text","Paste Message", "Forward Message", "Message Info", "Delete Messages","Call")
+        val items = arrayOf(
+            "Copy Message Text",
+            "Paste Message",
+            "Forward Message",
+            "Message Info",
+            "Delete Messages",
+            "Call",
+            "Save"
+        )
         val adapter: ArrayAdapter<String> =
             ArrayAdapter(context, R.layout.options_dialog_list_item, items)
         android.R.layout.simple_list_item_1
@@ -46,8 +55,10 @@ class ComposeOptionsDialog constructor(context: Context, private val listener: O
 
                 5 -> listener.onMessageCallClicked()
 
+                6 -> listener.onSaveClicked()
+
             }
-            isClickDismissed=true
+            isClickDismissed = true
             dismiss()
         }
     }
@@ -55,11 +66,12 @@ class ComposeOptionsDialog constructor(context: Context, private val listener: O
 
     interface OnComposeOptionsDialogItemClickListener {
         fun onCopyMessageClicked()
-        fun onPasteMessageClicked(dialog:ComposeOptionsDialog)
+        fun onPasteMessageClicked(dialog: ComposeOptionsDialog)
         fun onDeleteMessagesClicked()
         fun onForwardMessageClicked()
         fun onMessageInfoClicked()
         fun onMessageCallClicked()
+        fun onSaveClicked()
     }
 
 }

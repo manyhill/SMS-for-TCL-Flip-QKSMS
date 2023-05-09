@@ -28,6 +28,8 @@ import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkViewModel
 import com.moez.QKSMS.common.util.ClipboardUtils
+import com.moez.QKSMS.common.util.FileUtils.saveImageToGallery
+import com.moez.QKSMS.common.util.FileUtils.saveVideoToGallery
 import com.moez.QKSMS.common.util.MessageDetailsFormatter
 import com.moez.QKSMS.common.util.extensions.makeToast
 import com.moez.QKSMS.compat.SubscriptionManagerCompat
@@ -298,6 +300,26 @@ class ComposeViewModel @Inject constructor(
 
                 ClipboardUtils.copy(context, text)
             }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
+
+
+        // Save images to gallery
+        view.optionsItemIntent.filter { it == R.id.save }
+            .withLatestFrom(view.messagesSelectedIntent) { _, messageIds ->
+                val messages = messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
+                val clickedMessage: Message = messages.first()
+                if (clickedMessage.isMms()) {
+                    for (part in clickedMessage.parts) {
+                        part?.let { p ->
+                            if (p.isVideo()) {
+                                context.saveVideoToGallery(p.getUri())
+                            } else if (p.isImage()) {
+                                context.saveImageToGallery(p.getUri())
+                            }
+                        }
+                    }
+                }
+            }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
+
 
         // Show the message details
         view.optionsItemIntent.filter { it == R.id.details }
