@@ -509,6 +509,29 @@ class ComposeViewModel @Inject constructor(
         }.autoDisposable(view.scope())
             .subscribe { scheduled -> newState { copy(scheduled = scheduled) } }
 
+        // Attach an audio file
+//        view.attachAudioIntent
+//            .doOnNext { newState { copy(attaching = false) } }
+//            .autoDisposable(view.scope())
+//            .subscribe { view.requestAudio() }
+
+        view.optionsItemIntent.filter { it == R.id.attach_audio }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.requestAudio() }
+
+
+        // Attach a video file
+//        view.attachVideoIntent
+//            .doOnNext { newState { copy(attaching = false) } }
+//            .autoDisposable(view.scope())
+//            .subscribe { view.requestVideo() }
+
+        view.optionsItemIntent.filter { it == R.id.attach_video }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.requestVideo() }
+
+
+
         // Attach a contact
         view.attachContactIntent.doOnNext { newState { copy(attaching = false) } }
             .autoDisposable(view.scope()).subscribe { view.requestContact() }
@@ -525,6 +548,30 @@ class ComposeViewModel @Inject constructor(
                 context.makeToast(R.string.compose_contact_error)
                 Timber.w(error)
             }
+
+        Observable.merge(
+            view.audioSelectedIntent.map { uri ->
+                Attachment.File(uri)
+            },
+            view.inputContentIntent.map { inputContent ->
+                Attachment.File(inputContent = inputContent)
+            })
+            .withLatestFrom(attachments) { attachment, attachments -> attachments + attachment }
+            .doOnNext(attachments::onNext)
+            .autoDisposable(view.scope())
+            .subscribe { newState { copy(attaching = false) } }
+
+        Observable.merge(
+            view.videoSelectedIntent.map { uri ->
+                Attachment.Video(uri)
+            },
+            view.inputContentIntent.map { inputContent ->
+                Attachment.Video(inputContent = inputContent)
+            })
+            .withLatestFrom(attachments) { attachment, attachments -> attachments + attachment }
+            .doOnNext(attachments::onNext)
+            .autoDisposable(view.scope())
+            .subscribe { newState { copy(attaching = false) } }
 
         // Detach a photo
         view.attachmentDeletedIntent.withLatestFrom(attachments) { bitmap, attachments -> attachments.filter { it !== bitmap } }
@@ -624,8 +671,14 @@ class ComposeViewModel @Inject constructor(
                     state.scheduled != 0L -> {
                         newState { copy(scheduled = 0) }
                         val uris =
-                            attachments.mapNotNull { it as? Attachment.Image }.map { it.getUri() }
-                                .map { it.toString() }
+                            attachments.mapNotNull { attachment ->
+                                    when(attachment) {
+                                        is Attachment.Image -> attachment.getUri()
+                                        is Attachment.Video -> attachment.getUri()
+                                        is Attachment.File -> attachment.getUri()
+                                        else -> null
+                                    }
+                                }.mapNotNull { it.toString() }
                         val params = AddScheduledMessage.Params(
                             state.scheduled, subId, addresses, sendAsGroup, body, uris
                         )

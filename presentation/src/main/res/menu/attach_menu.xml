@@ -16,6 +16,20 @@
         android:icon="@drawable/ic_insert_photo_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/compose_gallery_cd" />
+
+     <item
+        android:id="@+id/attach_audio"
+        android:icon="@drawable/ic_audiotrack_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_audio_cd" />
+
+     <item
+        android:id="@+id/attach_video"
+         android:icon="@drawable/ic_audiotrack_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_video_cd" />
+
+
     <item
         android:id="@+id/take_photo"
         android:icon="@drawable/ic_camera_alt_black_24dp"

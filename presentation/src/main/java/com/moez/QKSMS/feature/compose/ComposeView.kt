@@ -48,6 +48,8 @@ interface ComposeView : QkView<ComposeState> {
     val attachContactIntent: Observable<*>
     val attachmentSelectedIntent: Observable<Uri>
     val contactSelectedIntent: Observable<Uri>
+    val audioSelectedIntent: Observable<Uri>
+    val videoSelectedIntent: Observable<Uri>
     val inputContentIntent: Observable<InputContentInfoCompat>
     val scheduleSelectedIntent: Observable<Long>
     val scheduleCancelIntent: Observable<*>
@@ -66,6 +68,8 @@ interface ComposeView : QkView<ComposeState> {
     fun showKeyboard()
     fun requestCamera()
     fun requestGallery()
+    fun requestAudio()
+    fun requestVideo()
     fun requestVoice()
     fun requestDatePicker()
     fun requestContact()

@@ -122,6 +122,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         private const val TakePhotoRequestCode = 1
         private const val AttachPhotoRequestCode = 2
         private const val AttachContactRequestCode = 3
+        private const val AttachAudioRequestCode = 4
+        private const val AttachVideoRequestCode = 5
 
         private const val CameraDestinationKey = "camera_destination"
     }
@@ -175,12 +177,15 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             contact.clicks(), contactLabel.clicks()
         )
     }
+
     override val attachmentSelectedIntent: Subject<Uri> = PublishSubject.create()
     override val contactSelectedIntent: Subject<Uri> = PublishSubject.create()
     override val inputContentIntent by lazy { message.inputContentSelected }
     override val scheduleSelectedIntent: Subject<Long> = PublishSubject.create()
     override val changeSimIntent by lazy { sim.clicks() }
     override val scheduleCancelIntent by lazy { scheduledCancel.clicks() }
+    override val audioSelectedIntent: Subject<Uri> = PublishSubject.create()
+    override val videoSelectedIntent: Subject<Uri> = PublishSubject.create()
 
     //    override val sendIntent by lazy { send.clicks() }
     override val sendIntent by lazy {
@@ -503,6 +508,28 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         startActivityForResult(Intent.createChooser(intent, null), AttachPhotoRequestCode)
     }
 
+    override fun requestAudio() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+            .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .setType("audio/*")
+        startActivityForResult(Intent.createChooser(intent, null), AttachAudioRequestCode)
+    }
+
+    override fun requestVideo() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+            .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .setType("video/*")
+        startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
+    }
+
     override fun setDraft(draft: String) {
         message.setText(draft)
         message.setSelection(draft.length)
@@ -553,6 +580,19 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?.forEach(attachmentSelectedIntent::onNext) ?: data?.data?.let(
                     attachmentSelectedIntent::onNext
                 )
+            }
+
+            requestCode == AttachAudioRequestCode && resultCode == Activity.RESULT_OK -> {
+                data?.clipData?.itemCount?.let { count -> 0 until count }
+                    ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
+                    ?.forEach(audioSelectedIntent::onNext)
+                    ?: data?.data?.let(audioSelectedIntent::onNext)
+            }
+            requestCode == AttachVideoRequestCode && resultCode == Activity.RESULT_OK -> {
+                data?.clipData?.itemCount?.let { count -> 0 until count }
+                    ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
+                    ?.forEach(videoSelectedIntent::onNext)
+                    ?: data?.data?.let(videoSelectedIntent::onNext)
             }
 
             requestCode == AttachContactRequestCode && resultCode == Activity.RESULT_OK -> {
