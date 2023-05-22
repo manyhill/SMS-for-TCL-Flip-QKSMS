@@ -12,7 +12,7 @@
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/compose_schedule_cd" />
     <item
-        android:id="@+id/attach_photo"
+        android:id="@+id/photo_menu"
         android:icon="@drawable/ic_insert_photo_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/compose_gallery_cd" />
@@ -30,9 +30,5 @@
         android:title="@string/compose_video_cd" />
 
 
-    <item
-        android:id="@+id/take_photo"
-        android:icon="@drawable/ic_camera_alt_black_24dp"
-        android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_camera_cd" />
+
 </menu>

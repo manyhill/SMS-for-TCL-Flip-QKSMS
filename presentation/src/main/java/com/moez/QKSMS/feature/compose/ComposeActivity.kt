@@ -23,22 +23,14 @@ import android.animation.LayoutTransition
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
-import android.content.ClipboardManager
-import android.content.ContentValues
-import android.content.Context
-import android.content.Intent
+import android.content.*
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.text.format.DateFormat
-import android.view.Gravity
-import android.view.KeyEvent
-import android.view.Menu
-import android.view.MenuItem
-import android.view.ViewGroup
-import android.view.WindowManager
+import android.view.*
 import android.widget.PopupMenu
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
@@ -55,17 +47,7 @@ import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkThemedActivity
 import com.moez.QKSMS.common.util.DateFormatter
-import com.moez.QKSMS.common.util.extensions.autoScrollToStart
-import com.moez.QKSMS.common.util.extensions.hideKeyboard
-import com.moez.QKSMS.common.util.extensions.makeToast
-import com.moez.QKSMS.common.util.extensions.resolveThemeColor
-import com.moez.QKSMS.common.util.extensions.scrapViews
-import com.moez.QKSMS.common.util.extensions.setBackgroundTint
-import com.moez.QKSMS.common.util.extensions.setLastItemFocusedListener
-import com.moez.QKSMS.common.util.extensions.setLastItemVisibleListener
-import com.moez.QKSMS.common.util.extensions.setTint
-import com.moez.QKSMS.common.util.extensions.setVisible
-import com.moez.QKSMS.common.util.extensions.showKeyboard
+import com.moez.QKSMS.common.util.extensions.*
 import com.moez.QKSMS.feature.compose.editing.ChipsAdapter
 import com.moez.QKSMS.feature.contacts.ContactsActivity
 import com.moez.QKSMS.model.Attachment
@@ -76,43 +58,9 @@ import dagger.android.AndroidInjection
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
-import kotlinx.android.synthetic.main.compose_activity.attach
-import kotlinx.android.synthetic.main.compose_activity.attach_tv
-import kotlinx.android.synthetic.main.compose_activity.attachingBackground
-import kotlinx.android.synthetic.main.compose_activity.attachments
-import kotlinx.android.synthetic.main.compose_activity.camera
-import kotlinx.android.synthetic.main.compose_activity.cameraLabel
-import kotlinx.android.synthetic.main.compose_activity.chips
-import kotlinx.android.synthetic.main.compose_activity.composeBar
-import kotlinx.android.synthetic.main.compose_activity.contact
-import kotlinx.android.synthetic.main.compose_activity.contactLabel
-import kotlinx.android.synthetic.main.compose_activity.contentView
-import kotlinx.android.synthetic.main.compose_activity.counter
-import kotlinx.android.synthetic.main.compose_activity.gallery
-import kotlinx.android.synthetic.main.compose_activity.galleryLabel
-import kotlinx.android.synthetic.main.compose_activity.loading
-import kotlinx.android.synthetic.main.compose_activity.message
-import kotlinx.android.synthetic.main.compose_activity.messageBackground
-import kotlinx.android.synthetic.main.compose_activity.messageList
-import kotlinx.android.synthetic.main.compose_activity.messagesEmpty
-import kotlinx.android.synthetic.main.compose_activity.schedule
-import kotlinx.android.synthetic.main.compose_activity.scheduleLabel
-import kotlinx.android.synthetic.main.compose_activity.scheduledCancel
-import kotlinx.android.synthetic.main.compose_activity.scheduledGroup
-import kotlinx.android.synthetic.main.compose_activity.scheduledTime
-import kotlinx.android.synthetic.main.compose_activity.sendAsGroup
-import kotlinx.android.synthetic.main.compose_activity.sendAsGroupBackground
-import kotlinx.android.synthetic.main.compose_activity.sendAsGroupSwitch
-import kotlinx.android.synthetic.main.compose_activity.send_tv
-import kotlinx.android.synthetic.main.compose_activity.sim
-import kotlinx.android.synthetic.main.compose_activity.simIndex
-import kotlinx.android.synthetic.main.compose_activity.toolbar
-import kotlinx.android.synthetic.main.compose_activity.toolbarSubtitle
-import kotlinx.android.synthetic.main.compose_activity.toolbarTitle
+import kotlinx.android.synthetic.main.compose_activity.*
 import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import java.util.*
 import javax.inject.Inject
 
 class ComposeActivity : QkThemedActivity(), ComposeView {
@@ -124,6 +72,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         private const val AttachContactRequestCode = 3
         private const val AttachAudioRequestCode = 4
         private const val AttachVideoRequestCode = 5
+        private const val RecordAudioRequestCode = 6
+
 
         private const val CameraDestinationKey = "camera_destination"
     }
@@ -490,12 +440,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         )
         startActivityForResult(Intent.createChooser(intent, null), TakePhotoRequestCode)
     }
-
+//updated
     override fun requestGallery() {
         val intent = Intent(Intent.ACTION_PICK).putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).setType("image/*")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).setType("vnd.android.cursor.dir/image")
         startActivityForResult(Intent.createChooser(intent, null), AttachPhotoRequestCode)
     }
 
@@ -507,26 +457,36 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             .setType("audio/3gp|audio/AMR|audio/mp3")
         startActivityForResult(Intent.createChooser(intent, null), AttachPhotoRequestCode)
     }
-
+    override fun recordAudio() {
+        val intent = Intent("android.intent.action.GET_CONTENT")
+        intent.type = "audio/amr"
+        intent.setClassName("com.android.soundrecorder", "com.android.soundrecorder.SoundRecorder")
+        intent.putExtra("android.provider.MediaStore.extra.MAX_BYTES", 600000)
+        intent.putExtra("exit_after_record", true)
+        startActivityForResult(Intent.createChooser(intent, null), RecordAudioRequestCode)
+    }
     override fun requestAudio() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
+        intent.setComponent(ComponentName("com.android.music", "com.android.music.AlbumBrowserActivity"))
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            .setType("audio/*")
+            .setData(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
         startActivityForResult(Intent.createChooser(intent, null), AttachAudioRequestCode)
     }
-
+//updated
     override fun requestVideo() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+
+        val intent = Intent(Intent.ACTION_PICK)
+        intent.setComponent(ComponentName("com.android.gallery3d","com.android.gallery3d.app.GalleryActivity"          ))
             .addCategory(Intent.CATEGORY_OPENABLE)
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-            .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, true)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            .setType("video/*")
+            .setType("vnd.android.cursor.dir/video")
         startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
     }
 
@@ -690,6 +650,20 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             }
             popUp.show()
         }
+    }
+     override fun initPhotoMenu() {
+
+            val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
+            popUp.inflate(R.menu.attach_photo_menu)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                popUp.setForceShowIcon(true)
+            }
+            popUp.setOnMenuItemClickListener { item ->
+                optionsItemIntent.onNext(item.itemId)
+                true
+            }
+            popUp.show()
+
     }
 
     private fun showOptionsDialog() {

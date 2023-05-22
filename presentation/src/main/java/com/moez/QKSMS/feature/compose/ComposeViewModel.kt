@@ -478,6 +478,10 @@ class ComposeViewModel @Inject constructor(
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
             .subscribe { view.requestGallery() }
 
+        view.optionsItemIntent.filter { it == R.id.photo_menu }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.initPhotoMenu() }
+
 
         // Choose a time to schedule the message
         view.scheduleIntent.doOnNext { newState { copy(attaching = false) } }
