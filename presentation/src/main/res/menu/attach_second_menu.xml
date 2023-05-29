@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/photo_menu"
+        android:icon="@drawable/ic_insert_photo_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_gallery_cd" />
+
+    <item
+        android:id="@+id/video_menu"
+        android:icon="@drawable/ic_baseline_videocam_24"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_video_cd" />
+    <item
+        android:id="@+id/attach_audio"
+        android:icon="@drawable/ic_audiotrack_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_audio_cd" />
+
+    <item
+        android:id="@+id/attach_contact"
+        android:icon="@drawable/ic_person_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_contact_cd" />
+
+
+</menu>

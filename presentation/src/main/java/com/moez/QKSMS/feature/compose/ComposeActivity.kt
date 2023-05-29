@@ -24,14 +24,17 @@ import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.*
+import android.media.CamcorderProfile
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.text.format.DateFormat
+import android.util.Log
 import android.view.*
 import android.widget.PopupMenu
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isVisible
@@ -73,6 +76,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         private const val AttachAudioRequestCode = 4
         private const val AttachVideoRequestCode = 5
         private const val RecordAudioRequestCode = 6
+        private const val RecordVideoRequestCode = 7
 
 
         private const val CameraDestinationKey = "camera_destination"
@@ -155,6 +159,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     private var cameraDestination: Uri? = null
 
+    private val sVideoDuration = intArrayOf(0, 5, 10, 15, 20, 30, 40, 50, 60, 90, 120)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
@@ -465,10 +470,48 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         intent.putExtra("exit_after_record", true)
         startActivityForResult(Intent.createChooser(intent, null), RecordAudioRequestCode)
     }
+    override fun recordVideo() {
+        val maxMessageSize =1048576-1024
+        val j2 = (maxMessageSize.toFloat() * 0.85f).toLong()
+        val videoCaptureDurationLimit = getVideoCaptureDurationLimit(j2)
+///
+           // .addCategory(Intent.CATEGORY_OPENABLE)
+
+        ////////////////////
+        val intent = Intent("android.media.action.VIDEO_CAPTURE")
+        .putExtra("android.intent.extra.videoQuality", 0)
+        .putExtra("android.intent.extra.sizeLimit", j2)
+        .putExtra("android.intent.extra.durationLimit", videoCaptureDurationLimit)
+        .putExtra(MediaStore.EXTRA_OUTPUT,Uri.parse("content://mms_temp_file/scrapSpace") )
+
+        startActivityForResult(Intent.createChooser(intent, null), RecordVideoRequestCode)
+    }
+
+    fun getVideoCaptureDurationLimit(j: Long): Int {
+        val camcorderProfile: CamcorderProfile?
+        camcorderProfile = try {
+            CamcorderProfile.get(0)
+        } catch (e: RuntimeException) {
+           // Log.e(TAG, "RuntimeException caught while getting camera info", e)
+            null
+        }
+        if (camcorderProfile == null) {
+            return 0
+        }
+        val j2: Long = j * 8 / (camcorderProfile.audioBitRate + camcorderProfile.videoBitRate)
+        for (length in sVideoDuration.size - 1 downTo 0) {
+            val iArr: IntArray = sVideoDuration
+            if (j2 >= iArr[length]) {
+                return iArr[length]
+            }
+        }
+        return 0
+    }
+
     override fun requestAudio() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
-        intent.setComponent(ComponentName("com.android.music", "com.android.music.AlbumBrowserActivity"))
+        intent.setComponent(ComponentName("com.android.music", "com.android.music.MusicPicker"))
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
@@ -548,6 +591,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?.forEach(audioSelectedIntent::onNext)
                     ?: data?.data?.let(audioSelectedIntent::onNext)
             }
+            requestCode == RecordAudioRequestCode && resultCode == Activity.RESULT_OK -> {
+                data?.clipData?.itemCount?.let { count -> 0 until count }
+                    ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
+                    ?.forEach(audioSelectedIntent::onNext)
+                    ?: data?.data?.let(audioSelectedIntent::onNext)
+            }
             requestCode == AttachVideoRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.clipData?.itemCount?.let { count -> 0 until count }
                     ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
@@ -555,6 +604,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?: data?.data?.let(videoSelectedIntent::onNext)
             }
 
+            requestCode ==  RecordVideoRequestCode && resultCode == Activity.RESULT_OK -> {
+                data?.clipData?.itemCount?.let { count -> 0 until count }
+                    ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
+                    ?.forEach(videoSelectedIntent::onNext)
+                    ?: data?.data?.let(videoSelectedIntent::onNext)
+            }
             requestCode == AttachContactRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.data?.let(contactSelectedIntent::onNext)
             }
@@ -651,6 +706,20 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             popUp.show()
         }
     }
+    override fun initSecondMenu() {
+
+        val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
+        popUp.inflate(R.menu.attach_second_menu)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            popUp.setForceShowIcon(true)
+        }
+        popUp.setOnMenuItemClickListener { item ->
+            optionsItemIntent.onNext(item.itemId)
+            true
+        }
+        popUp.show()
+
+    }
      override fun initPhotoMenu() {
 
             val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
@@ -665,7 +734,20 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             popUp.show()
 
     }
+    override fun initVideoMenu() {
 
+        val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
+        popUp.inflate(R.menu.attach_video_menu)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            popUp.setForceShowIcon(true)
+        }
+        popUp.setOnMenuItemClickListener { item ->
+            optionsItemIntent.onNext(item.itemId)
+            true
+        }
+        popUp.show()
+
+    }
     private fun showOptionsDialog() {
 
 

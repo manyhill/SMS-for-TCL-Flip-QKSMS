@@ -474,6 +474,10 @@ class ComposeViewModel @Inject constructor(
         view.galleryIntent.doOnNext { newState { copy(attaching = false) } }
             .autoDisposable(view.scope()).subscribe { view.requestGallery() }
 
+        view.optionsItemIntent.filter { it == R.id.attach_second_menu }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.initSecondMenu() }
+
         view.optionsItemIntent.filter { it == R.id.attach_photo }
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
             .subscribe { view.requestGallery() }
@@ -481,6 +485,10 @@ class ComposeViewModel @Inject constructor(
         view.optionsItemIntent.filter { it == R.id.photo_menu }
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
             .subscribe { view.initPhotoMenu() }
+
+        view.optionsItemIntent.filter { it == R.id.video_menu }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.initVideoMenu() }
 
 
         // Choose a time to schedule the message
@@ -534,7 +542,9 @@ class ComposeViewModel @Inject constructor(
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
             .subscribe { view.requestVideo() }
 
-
+        view.optionsItemIntent.filter { it == R.id.record_video }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.recordVideo() }
 
         // Attach a contact
         view.attachContactIntent.doOnNext { newState { copy(attaching = false) } }

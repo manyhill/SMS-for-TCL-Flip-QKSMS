@@ -599,7 +599,7 @@
             android:paddingStart="16dp"
             android:paddingTop="5dp"
             android:paddingBottom="5dp"
-            android:text="@string/attach"
+            android:text="@string/options"
             android:textColor="@color/white"
             android:textSize="16sp" />
 

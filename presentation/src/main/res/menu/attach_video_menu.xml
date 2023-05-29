@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/attach_video"
+        android:icon="@drawable/ic_baseline_ondemand_video_24"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_video_cd" />
+    <item
+        android:id="@+id/record_video"
+        android:icon="@drawable/ic_baseline_videocam_24"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_video_record_cd" />
+</menu>

@@ -18,7 +18,7 @@
   -->
 <resources>
 
-    <string name="app_name" translatable="false">QKSMS</string>
+    <string name="app_name" translatable="false">Messages</string>
 
     <string name="shortcut_compose_long_label">New conversation</string>
     <string name="shortcut_compose_short_label">Compose</string>
@@ -140,6 +140,7 @@
     <string name="compose_contact_error">Error reading contact</string>
     <string name="compose_audio_cd">Attach audio</string>
     <string name="compose_video_cd">Attach a video</string>
+    <string name="compose_video_record_cd">Take a video</string>
     <!-- Example: SIM 1 (Verizon) selected-->
     <string name="compose_sim_changed_toast">SIM %1$d (%2$s) selected</string>
     <string name="compose_sim_cd">%s selected, change SIM card</string>

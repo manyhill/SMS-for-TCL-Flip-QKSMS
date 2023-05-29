@@ -114,7 +114,7 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
         sendDelayDialog.adapter.setData(R.array.delayed_sending_labels)
         mmsSizeDialog.adapter.setData(R.array.mms_sizes, R.array.mms_sizes_ids)
 
-        about.summary = context.getString(R.string.settings_version, BuildConfig.VERSION_NAME)
+        about.summary = "Based on QKSMS."+System.lineSeparator()+"Contact us:"+System.lineSeparator()+ "tclmessaging@gmail.com"//context.getString(R.string.settings_version, BuildConfig.VERSION_NAME)
     }
 
     override fun onAttach(view: View) {

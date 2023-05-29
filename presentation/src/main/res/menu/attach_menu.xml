@@ -1,34 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
+
+
     <item
-        android:id="@+id/attach_contact"
-        android:icon="@drawable/ic_person_black_24dp"
+        android:id="@+id/attach_second_menu"
+        android:icon="@drawable/ic_insert_photo_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_contact_cd" />
+        android:title="@string/attach" />
+
+
+    <item
+        android:id="@+id/call"
+        android:icon="@drawable/ic_insert_photo_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/menu_call" />
     <item
         android:id="@+id/schedule_message"
         android:icon="@drawable/ic_event_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/compose_schedule_cd" />
-    <item
-        android:id="@+id/photo_menu"
-        android:icon="@drawable/ic_insert_photo_black_24dp"
-        android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_gallery_cd" />
-
-     <item
-        android:id="@+id/attach_audio"
-        android:icon="@drawable/ic_audiotrack_black_24dp"
-        android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_audio_cd" />
-
-     <item
-        android:id="@+id/attach_video"
-         android:icon="@drawable/ic_audiotrack_black_24dp"
-        android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_video_cd" />
-
 
 
 </menu>
