@@ -20,6 +20,10 @@
         android:icon="@drawable/ic_event_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/compose_schedule_cd" />
-
+    <item
+        android:id="@+id/conversation_details"
+        android:icon="@drawable/ic_more_vert_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/info_title" />
 
 </menu>

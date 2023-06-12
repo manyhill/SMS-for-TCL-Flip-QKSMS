@@ -24,6 +24,7 @@ import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.*
+import android.content.res.Resources
 import android.media.CamcorderProfile
 import android.net.Uri
 import android.os.Build
@@ -31,10 +32,9 @@ import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.text.format.DateFormat
-import android.util.Log
 import android.view.*
+import android.widget.NumberPicker
 import android.widget.PopupMenu
-import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isVisible
@@ -62,6 +62,8 @@ import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
 import kotlinx.android.synthetic.main.compose_activity.*
+import kotlinx.android.synthetic.main.qk_dialog.*
+import kotlinx.android.synthetic.main.qk_dialog.view.*
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -375,8 +377,15 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     }
 
     override fun requestDatePicker() {
+
+
+
+
         val calendar = Calendar.getInstance()
-        DatePickerDialog(
+
+
+        /////
+        val dateForm= DatePickerDialog(
             this,
             { _, year, month, day ->
                 TimePickerDialog(
@@ -392,15 +401,23 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     calendar.get(Calendar.HOUR_OF_DAY),
                     calendar.get(Calendar.MINUTE),
                     DateFormat.is24HourFormat(this)
+
                 ).show()
             },
             calendar.get(Calendar.YEAR),
             calendar.get(Calendar.MONTH),
             calendar.get(Calendar.DAY_OF_MONTH)
-        ).show()
+
+        )
+
+//
+
+
+        dateForm.show()
+
 
         // On some devices, the keyboard can cover the date picker
-        message.hideKeyboard()
+       message.hideKeyboard()
     }
 
     override fun requestContact() {
@@ -633,17 +650,20 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
 
-        return when (event?.scanCode) {
-            139 -> {
+        return when (event?.keyCode) {
+            KeyEvent.KEYCODE_SOFT_LEFT -> {
                 attach_tv.performClick()
                 true
             }
 
-            48 -> {
+            KeyEvent.KEYCODE_SOFT_RIGHT -> {
                 send_tv.performClick()
                 true
             }
-
+            KeyEvent.KEYCODE_DPAD_CENTER -> {
+                send_tv.performClick()
+                true
+            }
             else -> super.onKeyUp(keyCode, event)
         }
     }

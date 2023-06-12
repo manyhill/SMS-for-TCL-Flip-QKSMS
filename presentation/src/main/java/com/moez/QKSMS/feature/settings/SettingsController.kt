@@ -24,13 +24,13 @@ import android.content.Context
 import android.os.Build
 import android.text.format.DateFormat
 import android.view.View
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.isVisible
 import com.bluelinelabs.conductor.RouterTransaction
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
 import com.jakewharton.rxbinding2.view.longClicks
-import com.moez.QKSMS.BuildConfig
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.MenuItem
 import com.moez.QKSMS.common.QkChangeHandler
@@ -41,7 +41,6 @@ import com.moez.QKSMS.common.util.extensions.animateLayoutChanges
 import com.moez.QKSMS.common.util.extensions.setBackgroundTint
 import com.moez.QKSMS.common.util.extensions.setVisible
 import com.moez.QKSMS.common.widget.PreferenceView
-import com.moez.QKSMS.common.widget.QkSwitch
 import com.moez.QKSMS.common.widget.TextInputDialog
 import com.moez.QKSMS.feature.settings.about.AboutController
 import com.moez.QKSMS.feature.settings.autodelete.AutoDeleteDialog
@@ -55,13 +54,15 @@ import com.uber.autodispose.autoDisposable
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import kotlinx.android.synthetic.main.blocking_controller.*
 import kotlinx.android.synthetic.main.settings_controller.*
 import kotlinx.android.synthetic.main.settings_controller.view.*
 import kotlinx.android.synthetic.main.settings_switch_widget.view.*
 import kotlinx.android.synthetic.main.settings_theme_widget.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.util.logging.Logger
 import javax.inject.Inject
 import kotlin.coroutines.resume
 
@@ -212,7 +213,9 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
                 setActionTextColor(colors.theme().theme)
                 show()
             }
-        }
+                  }
+    //   Logger.( parent.toString(), Toast.LENGTH_LONG).show()
+
     }
 
     // TODO change this to a PopupWindow

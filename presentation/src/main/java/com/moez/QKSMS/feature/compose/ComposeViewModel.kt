@@ -491,6 +491,7 @@ class ComposeViewModel @Inject constructor(
             .subscribe { view.initVideoMenu() }
 
 
+
         // Choose a time to schedule the message
         view.scheduleIntent.doOnNext { newState { copy(attaching = false) } }
             .withLatestFrom(billingManager.upgradeStatus) { _, upgraded -> upgraded }
