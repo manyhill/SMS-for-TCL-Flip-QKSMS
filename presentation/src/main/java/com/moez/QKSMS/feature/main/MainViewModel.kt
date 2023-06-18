@@ -313,17 +313,17 @@ class MainViewModel @Inject constructor(
                 view.clearSelection()
             }.autoDisposable(view.scope()).subscribe()
 
-        view.plusBannerIntent.autoDisposable(view.scope()).subscribe {
-                newState { copy(drawerOpen = false) }
-                navigator.showQksmsPlusActivity("main_banner")
-            }
-
-        view.rateIntent.autoDisposable(view.scope()).subscribe {
-                navigator.showRating()
-                ratingManager.rate()
-            }
-
-        view.dismissRatingIntent.autoDisposable(view.scope()).subscribe { ratingManager.dismiss() }
+//        view.plusBannerIntent.autoDisposable(view.scope()).subscribe {
+//                newState { copy(drawerOpen = false) }
+//                navigator.showQksmsPlusActivity("main_banner")
+//            }
+//
+//        view.rateIntent.autoDisposable(view.scope()).subscribe {
+//                navigator.showRating()
+//                ratingManager.rate()
+//            }
+//
+//        view.dismissRatingIntent.autoDisposable(view.scope()).subscribe { ratingManager.dismiss() }
 
         view.conversationsSelectedIntent.withLatestFrom(state) { selection, state ->
                 val conversations = selection.mapNotNull(conversationRepo::getConversation)

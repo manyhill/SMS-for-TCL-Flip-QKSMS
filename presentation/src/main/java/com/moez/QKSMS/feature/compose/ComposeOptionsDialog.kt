@@ -25,11 +25,11 @@ class ComposeOptionsDialog constructor(
         listView = findViewById(R.id.option_dialog_list_view)
 
         val items = arrayOf(
-            "Copy Message Text",
-            "Paste Message",
-            "Forward Message",
-            "Message Info",
-            "Delete Messages",
+            "Copy",
+            "Paste",
+            "Forward",
+            "Info",
+            "Delete",
             "Call",
             "Save"
         )

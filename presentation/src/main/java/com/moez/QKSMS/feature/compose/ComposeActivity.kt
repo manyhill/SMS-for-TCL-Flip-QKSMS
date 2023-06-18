@@ -384,13 +384,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         val calendar = Calendar.getInstance()
 
 
-        /////
-        val dateForm= DatePickerDialog(
+        DatePickerDialog(
             this,
-            { _, year, month, day ->
+            DatePickerDialog.OnDateSetListener { _, year, month, day ->
                 TimePickerDialog(
                     this,
-                    { _, hour, minute ->
+                    TimePickerDialog.OnTimeSetListener { _, hour, minute ->
                         calendar.set(Calendar.YEAR, year)
                         calendar.set(Calendar.MONTH, month)
                         calendar.set(Calendar.DAY_OF_MONTH, day)
@@ -401,20 +400,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     calendar.get(Calendar.HOUR_OF_DAY),
                     calendar.get(Calendar.MINUTE),
                     DateFormat.is24HourFormat(this)
-
                 ).show()
             },
             calendar.get(Calendar.YEAR),
             calendar.get(Calendar.MONTH),
             calendar.get(Calendar.DAY_OF_MONTH)
-
-        )
-
-//
-
-
-        dateForm.show()
-
+        ).show()
 
         // On some devices, the keyboard can cover the date picker
        message.hideKeyboard()
@@ -650,23 +641,33 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
 
-        return when (event?.keyCode) {
-            KeyEvent.KEYCODE_SOFT_LEFT -> {
-                attach_tv.performClick()
-                true
-            }
 
-            KeyEvent.KEYCODE_SOFT_RIGHT -> {
-                send_tv.performClick()
-                true
+            return when (event?.keyCode ) {
+                KeyEvent.KEYCODE_SOFT_LEFT -> {
+                    attach_tv.performClick()
+                    true
+                }
+
+                KeyEvent.KEYCODE_SOFT_RIGHT -> {
+                   if(send_tv.isEnabled)
+                       send_tv.performClick()
+                    true
+                }
+
+                KeyEvent.KEYCODE_DPAD_CENTER -> {
+                    if(message.isFocused && send_tv.isEnabled) {
+                        send_tv.performClick()
+                        true
+                    }
+                    else {   super.onKeyUp(keyCode, event)}
+                }
+                else -> super.onKeyUp(keyCode, event)
             }
-            KeyEvent.KEYCODE_DPAD_CENTER -> {
-                send_tv.performClick()
-                true
-            }
-            else -> super.onKeyUp(keyCode, event)
         }
-    }
+
+
+
+
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return if (messageList.isFocused || (currentFocus?.parent as? ViewGroup?)?.id == R.id.messageList) {
