@@ -437,6 +437,7 @@
     <string name="copy_message_text">Copy Message Text</string>
     <string name="message_info">Message Info</string>
     <string name="delete_messages">Delete Messages</string>
+    <string name="ok">Ok</string>
 
     <string-array name="night_modes">
         <item>System</item>
