@@ -24,16 +24,14 @@ import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.*
-import android.content.res.Resources
+import android.icu.text.DateFormat
 import android.media.CamcorderProfile
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
-import android.text.format.DateFormat
 import android.view.*
-import android.widget.NumberPicker
 import android.widget.PopupMenu
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
@@ -81,6 +79,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         private const val AttachVideoRequestCode = 5
         private const val RecordAudioRequestCode = 6
         private const val RecordVideoRequestCode = 7
+        private const val DateTimePickerRequestCode = 8
 
 
         private const val CameraDestinationKey = "camera_destination"
@@ -164,6 +163,10 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     private var cameraDestination: Uri? = null
 
     private val sVideoDuration = intArrayOf(0, 5, 10, 15, 20, 30, 40, 50, 60, 90, 120)
+
+    private var datePickerDialog: DatePickerDialog? = null
+    private var timePickerDialog: TimePickerDialog? = null
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
@@ -380,37 +383,13 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     override fun requestDatePicker() {
 
-
-
-
-        val calendar = Calendar.getInstance()
-
-
-        DatePickerDialog(
-            this,
-            DatePickerDialog.OnDateSetListener { _, year, month, day ->
-                TimePickerDialog(
-                    this,
-                    TimePickerDialog.OnTimeSetListener { _, hour, minute ->
-                        calendar.set(Calendar.YEAR, year)
-                        calendar.set(Calendar.MONTH, month)
-                        calendar.set(Calendar.DAY_OF_MONTH, day)
-                        calendar.set(Calendar.HOUR_OF_DAY, hour)
-                        calendar.set(Calendar.MINUTE, minute)
-                        scheduleSelectedIntent.onNext(calendar.timeInMillis)
-                    },
-                    calendar.get(Calendar.HOUR_OF_DAY),
-                    calendar.get(Calendar.MINUTE),
-                    DateFormat.is24HourFormat(this)
-                ).show()
-            },
-            calendar.get(Calendar.YEAR),
-            calendar.get(Calendar.MONTH),
-            calendar.get(Calendar.DAY_OF_MONTH)
-        ).show()
+        startActivityForResult(
+            Intent(this, DateTimePickerActivity::class.java),
+            DateTimePickerRequestCode
+        )
 
         // On some devices, the keyboard can cover the date picker
-       message.hideKeyboard()
+        message.hideKeyboard()
     }
 
     override fun requestContact() {
@@ -455,7 +434,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         )
         startActivityForResult(Intent.createChooser(intent, null), TakePhotoRequestCode)
     }
-//updated
+
+    //updated
     override fun requestGallery() {
         val intent = Intent(Intent.ACTION_PICK).putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
@@ -472,6 +452,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             .setType("audio/3gp|audio/AMR|audio/mp3")
         startActivityForResult(Intent.createChooser(intent, null), AttachPhotoRequestCode)
     }
+
     override fun recordAudio() {
         val intent = Intent("android.intent.action.GET_CONTENT")
         intent.type = "audio/amr"
@@ -480,34 +461,31 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         intent.putExtra("exit_after_record", true)
         startActivityForResult(Intent.createChooser(intent, null), RecordAudioRequestCode)
     }
+
     override fun recordVideo() {
-        val maxMessageSize =1048576-1024
+        val maxMessageSize = 1048576 - 1024
         val j2 = (maxMessageSize.toFloat() * 0.85f).toLong()
         val videoCaptureDurationLimit = getVideoCaptureDurationLimit(j2)
 ///
-           // .addCategory(Intent.CATEGORY_OPENABLE)
+        // .addCategory(Intent.CATEGORY_OPENABLE)
 
         ////////////////////
         val intent = Intent("android.media.action.VIDEO_CAPTURE")
-        .putExtra("android.intent.extra.videoQuality", 0)
-        .putExtra("android.intent.extra.sizeLimit", j2)
-        .putExtra("android.intent.extra.durationLimit", videoCaptureDurationLimit)
-        .putExtra(MediaStore.EXTRA_OUTPUT,Uri.parse("content://mms_temp_file/scrapSpace") )
+            .putExtra("android.intent.extra.videoQuality", 0)
+            .putExtra("android.intent.extra.sizeLimit", j2)
+            .putExtra("android.intent.extra.durationLimit", videoCaptureDurationLimit)
+            .putExtra(MediaStore.EXTRA_OUTPUT, Uri.parse("content://mms_temp_file/scrapSpace"))
 
         startActivityForResult(Intent.createChooser(intent, null), RecordVideoRequestCode)
     }
 
-    fun getVideoCaptureDurationLimit(j: Long): Int {
-        val camcorderProfile: CamcorderProfile?
-        camcorderProfile = try {
+    private fun getVideoCaptureDurationLimit(j: Long): Int {
+        val camcorderProfile: CamcorderProfile = try {
             CamcorderProfile.get(0)
         } catch (e: RuntimeException) {
-           // Log.e(TAG, "RuntimeException caught while getting camera info", e)
+            // Log.e(TAG, "RuntimeException caught while getting camera info", e)
             null
-        }
-        if (camcorderProfile == null) {
-            return 0
-        }
+        } ?: return 0
         val j2: Long = j * 8 / (camcorderProfile.audioBitRate + camcorderProfile.videoBitRate)
         for (length in sVideoDuration.size - 1 downTo 0) {
             val iArr: IntArray = sVideoDuration
@@ -525,21 +503,26 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, false)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            .setData(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).data =
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         startActivityForResult(Intent.createChooser(intent, null), AttachAudioRequestCode)
     }
-//updated
+
+    //updated
     override fun requestVideo() {
 
         val intent = Intent(Intent.ACTION_PICK)
-        intent.setComponent(ComponentName("com.android.gallery3d","com.android.gallery3d.app.GalleryActivity"          ))
+        intent.setComponent(
+            ComponentName(
+                "com.android.gallery3d",
+                "com.android.gallery3d.app.GalleryActivity"
+            )
+        )
             .addCategory(Intent.CATEGORY_OPENABLE)
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            .setType("vnd.android.cursor.dir/video")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).type = "vnd.android.cursor.dir/video"
         startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
     }
 
@@ -575,6 +558,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         return super.getColoredMenuItems() + R.id.call
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         when {
             requestCode == SelectContactRequestCode -> {
@@ -601,12 +585,14 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?.forEach(audioSelectedIntent::onNext)
                     ?: data?.data?.let(audioSelectedIntent::onNext)
             }
+
             requestCode == RecordAudioRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.clipData?.itemCount?.let { count -> 0 until count }
                     ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
                     ?.forEach(audioSelectedIntent::onNext)
                     ?: data?.data?.let(audioSelectedIntent::onNext)
             }
+
             requestCode == AttachVideoRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.clipData?.itemCount?.let { count -> 0 until count }
                     ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
@@ -614,15 +600,28 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?: data?.data?.let(videoSelectedIntent::onNext)
             }
 
-            requestCode ==  RecordVideoRequestCode && resultCode == Activity.RESULT_OK -> {
+            requestCode == RecordVideoRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.clipData?.itemCount?.let { count -> 0 until count }
                     ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
                     ?.forEach(videoSelectedIntent::onNext)
                     ?: data?.data?.let(videoSelectedIntent::onNext)
             }
+
             requestCode == AttachContactRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.data?.let(contactSelectedIntent::onNext)
             }
+
+            requestCode == DateTimePickerRequestCode && resultCode == Activity.RESULT_OK -> {
+                data?.let {
+                    scheduleSelectedIntent.onNext(
+                        it.getLongExtra(
+                            DateTimePickerActivity.TIME_IN_MILLS,
+                            System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+
 
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
@@ -644,31 +643,30 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
 
 
-            return when (event?.keyCode ) {
-                KeyEvent.KEYCODE_SOFT_LEFT -> {
-                    attach_tv.performClick()
-                    true
-                }
-
-                KeyEvent.KEYCODE_SOFT_RIGHT -> {
-                   if(send_tv.isEnabled)
-                       send_tv.performClick()
-                    true
-                }
-
-                KeyEvent.KEYCODE_DPAD_CENTER -> {
-                    if(message.isFocused && send_tv.isEnabled) {
-                        send_tv.performClick()
-                        true
-                    }
-                    else {   super.onKeyUp(keyCode, event)}
-                }
-                else -> super.onKeyUp(keyCode, event)
+        return when (event?.keyCode) {
+            KeyEvent.KEYCODE_SOFT_LEFT -> {
+                attach_tv.performClick()
+                true
             }
+
+            KeyEvent.KEYCODE_SOFT_RIGHT -> {
+                if (send_tv.isEnabled)
+                    send_tv.performClick()
+                true
+            }
+
+            KeyEvent.KEYCODE_DPAD_CENTER -> {
+                if (message.isFocused && send_tv.isEnabled) {
+                    send_tv.performClick()
+                    true
+                } else {
+                    super.onKeyUp(keyCode, event)
+                }
+            }
+
+            else -> super.onKeyUp(keyCode, event)
         }
-
-
-
+    }
 
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -735,6 +733,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             popUp.show()
         }
     }
+
     override fun initSecondMenu() {
 
         val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
@@ -749,18 +748,19 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         popUp.show()
 
     }
-     override fun initPhotoMenu() {
 
-            val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
-            popUp.inflate(R.menu.attach_photo_menu)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                popUp.setForceShowIcon(true)
-            }
-            popUp.setOnMenuItemClickListener { item ->
-                optionsItemIntent.onNext(item.itemId)
-                true
-            }
-            popUp.show()
+    override fun initPhotoMenu() {
+
+        val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
+        popUp.inflate(R.menu.attach_photo_menu)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            popUp.setForceShowIcon(true)
+        }
+        popUp.setOnMenuItemClickListener { item ->
+            optionsItemIntent.onNext(item.itemId)
+            true
+        }
+        popUp.show()
 
     }
     override fun pasteText()
@@ -774,6 +774,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             setDraft(text as String)
         }
     }
+
     override fun initVideoMenu() {
 
         val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
@@ -788,6 +789,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         popUp.show()
 
     }
+
     private fun showOptionsDialog() {
 
 
