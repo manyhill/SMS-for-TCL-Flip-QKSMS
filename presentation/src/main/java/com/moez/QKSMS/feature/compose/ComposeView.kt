@@ -78,6 +78,7 @@ interface ComposeView : QkView<ComposeState> {
     fun initPhotoMenu()
     fun initVideoMenu()
     fun initSecondMenu()
+    fun pasteText()
     fun setDraft(draft: String)
     fun scrollToMessage(id: Long)
     fun showQksmsPlusSnackbar(@StringRes message: Int)

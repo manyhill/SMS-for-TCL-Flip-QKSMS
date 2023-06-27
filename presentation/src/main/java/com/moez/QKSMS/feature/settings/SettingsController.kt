@@ -31,6 +31,7 @@ import com.bluelinelabs.conductor.RouterTransaction
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
 import com.jakewharton.rxbinding2.view.longClicks
+import com.moez.QKSMS.BuildConfig
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.MenuItem
 import com.moez.QKSMS.common.QkChangeHandler
@@ -107,7 +108,8 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
 
         when (Build.VERSION.SDK_INT >= 29) {
             true -> nightModeDialog.adapter.setData(R.array.night_modes)
-            false -> nightModeDialog.adapter.data = context.resources.getStringArray(R.array.night_modes)
+            false -> nightModeDialog.adapter.data =
+                context.resources.getStringArray(R.array.night_modes)
                     .mapIndexed { index, title -> MenuItem(title, index) }
                     .drop(1)
         }
@@ -115,7 +117,7 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
         sendDelayDialog.adapter.setData(R.array.delayed_sending_labels)
         mmsSizeDialog.adapter.setData(R.array.mms_sizes, R.array.mms_sizes_ids)
 
-        about.summary = "Based on QKSMS."+System.lineSeparator()+"Contact us:"+System.lineSeparator()+ "tclmessaging@gmail.com"//context.getString(R.string.settings_version, BuildConfig.VERSION_NAME)
+        about.summary =    context.getString(R.string.settings_version, BuildConfig.VERSION_NAME)
     }
 
     override fun onAttach(view: View) {

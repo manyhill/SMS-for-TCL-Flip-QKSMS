@@ -10,6 +10,11 @@ import java.io.InputStream
 
 object FileUtils {
 
+    fun Context.nothingToSave()
+    {
+        makeToast("Nothing to save")
+
+    }
     fun Context.saveImageToGallery(imageUri: Uri) {
         val contentResolver = contentResolver
         var inputStream: InputStream? = null

@@ -28,6 +28,7 @@ import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkViewModel
 import com.moez.QKSMS.common.util.ClipboardUtils
+import com.moez.QKSMS.common.util.FileUtils.nothingToSave
 import com.moez.QKSMS.common.util.FileUtils.saveImageToGallery
 import com.moez.QKSMS.common.util.FileUtils.saveVideoToGallery
 import com.moez.QKSMS.common.util.MessageDetailsFormatter
@@ -315,8 +316,11 @@ class ComposeViewModel @Inject constructor(
                             } else if (p.isImage()) {
                                 context.saveImageToGallery(p.getUri())
                             }
-                        }
+                                                }
                     }
+                }
+                else {
+                    context.nothingToSave()
                 }
             }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
 
@@ -477,6 +481,10 @@ class ComposeViewModel @Inject constructor(
         view.optionsItemIntent.filter { it == R.id.attach_second_menu }
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
             .subscribe { view.initSecondMenu() }
+
+        view.optionsItemIntent.filter { it == R.id.paste }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.pasteText() }
 
         view.optionsItemIntent.filter { it == R.id.attach_photo }
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())

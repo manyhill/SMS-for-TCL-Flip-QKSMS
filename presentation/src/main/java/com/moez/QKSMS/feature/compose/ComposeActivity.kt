@@ -45,6 +45,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.flexbox.FlexboxLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
+import com.jakewharton.rxbinding2.view.visible
 import com.jakewharton.rxbinding2.widget.textChanges
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
@@ -54,6 +55,7 @@ import com.moez.QKSMS.common.util.extensions.*
 import com.moez.QKSMS.feature.compose.editing.ChipsAdapter
 import com.moez.QKSMS.feature.contacts.ContactsActivity
 import com.moez.QKSMS.model.Attachment
+import com.moez.QKSMS.model.Message
 import com.moez.QKSMS.model.Recipient
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
@@ -716,7 +718,13 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     private fun initClicks() {
         attach_tv.setOnClickListener {
             val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
+//            View view = LayoutInflater.from({context}).inflate(R.layout.{XML_name}, null);
+//            TextView tv_year = (TextView)view.findViewById(R.id.tv_year);
+         //   toolbar.menu.findItem(R.id.call)?.isVisible =
             popUp.inflate(R.menu.attach_menu)
+            popUp.menu.findItem(R.id.cancel1)?.isVisible=false
+            //messageAdapter.cancelSending.onNext(messageAdapter.getItemId(1))
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 popUp.setForceShowIcon(true)
             }
@@ -754,6 +762,17 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             }
             popUp.show()
 
+    }
+    override fun pasteText()
+    {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+
+        if (clip != null && clip.itemCount > 0) {
+            val text = clip.getItemAt(0).coerceToText(this@ComposeActivity)
+            // Use the 'text' variable to access the copied text
+            setDraft(text as String)
+        }
     }
     override fun initVideoMenu() {
 

@@ -30,7 +30,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:padding="1dp"
+        android:padding="0dp"
         app:layout_constraintEnd_toStartOf="@id/sim"
         app:layout_constraintHorizontal_chainStyle="packed"
         app:layout_constraintStart_toStartOf="parent"
@@ -80,7 +80,7 @@
 
     <com.moez.QKSMS.common.widget.AvatarView
         android:id="@+id/avatar"
-        android:layout_width="23dp"
+        android:layout_width="20dp"
         android:layout_height="20dp"
         app:layout_constraintBottom_toTopOf="@+id/attachments"
         app:layout_constraintStart_toStartOf="parent" />
@@ -90,7 +90,7 @@
         style="@style/TextPrimary"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
+        android:layout_marginStart="6dp"
         android:layout_marginTop="1dp"
         android:autoLink="email|phone|web"
         android:background="@drawable/message_only"

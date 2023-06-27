@@ -25,13 +25,12 @@ class ComposeOptionsDialog constructor(
         listView = findViewById(R.id.option_dialog_list_view)
 
         val items = arrayOf(
-            "Copy",
-            "Paste",
-            "Forward",
-            "Info",
-            "Delete",
-            "Call",
-            "Save"
+            "Copy Text",
+            "Forward Message",
+            "Delete Message",
+            "Save to Gallery",
+            "Message Info",
+            "Call"
         )
         val adapter: ArrayAdapter<String> =
             ArrayAdapter(context, R.layout.options_dialog_list_item, items)
@@ -45,17 +44,23 @@ class ComposeOptionsDialog constructor(
             when (position) {
                 0 -> listener.onCopyMessageClicked()
 
-                1 -> listener.onPasteMessageClicked(this@ComposeOptionsDialog)
+              //  1 -> listener.onPasteMessageClicked(this@ComposeOptionsDialog)
 
-                2 -> listener.onForwardMessageClicked()
+                1 -> listener.onForwardMessageClicked()
 
-                3 -> listener.onMessageInfoClicked()
+                2 -> listener.onDeleteMessagesClicked()
 
-                4 -> listener.onDeleteMessagesClicked()
+                3 -> listener.onSaveClicked()
+
+                4-> listener.onMessageInfoClicked()
 
                 5 -> listener.onMessageCallClicked()
 
-                6 -> listener.onSaveClicked()
+
+
+
+
+
 
             }
             isClickDismissed = true
