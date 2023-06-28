@@ -201,7 +201,7 @@ class DateTimePickerActivity : AppCompatActivity() {
             hour_picker.value = currentHour12
             selectedHour = currentHour12
 
-            val amPmDisplayValues = arrayOf("AM", "PM")
+            val amPmDisplayValues = arrayOf("PM", "AM")
             am_pm_picker.minValue = 0
             am_pm_picker.maxValue = 1
             am_pm_picker.displayedValues = amPmDisplayValues

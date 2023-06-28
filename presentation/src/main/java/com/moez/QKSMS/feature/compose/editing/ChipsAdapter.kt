@@ -33,6 +33,8 @@ import com.moez.QKSMS.common.util.extensions.setBackgroundTint
 import com.moez.QKSMS.model.Recipient
 import io.reactivex.subjects.PublishSubject
 import kotlinx.android.synthetic.main.contact_chip.*
+import kotlinx.android.synthetic.main.contact_chip.name
+import kotlinx.android.synthetic.main.mms_vcard_list_item.*
 import javax.inject.Inject
 
 class ChipsAdapter @Inject constructor() : QkAdapter<Recipient>() {
@@ -61,6 +63,7 @@ class ChipsAdapter @Inject constructor() : QkAdapter<Recipient>() {
 
         holder.avatar.setRecipient(recipient)
         holder.name.text = recipient.contact?.name?.takeIf { it.isNotBlank() } ?: recipient.address
+        holder.labelNumber.text =recipient.contact?.getDefaultNumber().toString()
     }
 
     /**

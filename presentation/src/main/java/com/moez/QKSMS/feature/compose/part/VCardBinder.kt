@@ -77,13 +77,14 @@ class VCardBinder @Inject constructor(colors: Colors, private val context: Conte
             holder.vCardBackground.setBackgroundTint(theme.theme)
             holder.vCardAvatar.setTint(theme.textPrimary)
             holder.name.setTextColor(theme.textPrimary)
-            holder.label.setTextColor(theme.textTertiary)
+            holder.labelNumber.setTextColor(theme.textTertiary)
+
         } else {
             holder.vCardBackground.layoutParams = params.apply { gravity = Gravity.END }
             holder.vCardBackground.setBackgroundTint(holder.containerView.context.resolveThemeColor(R.attr.bubbleColor))
             holder.vCardAvatar.setTint(holder.containerView.context.resolveThemeColor(android.R.attr.textColorSecondary))
             holder.name.setTextColor(holder.containerView.context.resolveThemeColor(android.R.attr.textColorPrimary))
-            holder.label.setTextColor(holder.containerView.context.resolveThemeColor(android.R.attr.textColorTertiary))
+            holder.labelNumber.setTextColor(holder.containerView.context.resolveThemeColor(android.R.attr.textColorTertiary))
         }
     }
 
