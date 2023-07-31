@@ -227,8 +227,8 @@ class Navigator @Inject constructor(
     fun showSupport() {
         val intent = Intent(Intent.ACTION_SENDTO)
         intent.data = Uri.parse("mailto:")
-        intent.putExtra(Intent.EXTRA_EMAIL, arrayOf("moez@qklabs.com"))
-        intent.putExtra(Intent.EXTRA_SUBJECT, "QKSMS Support")
+        intent.putExtra(Intent.EXTRA_EMAIL, arrayOf("tclmessaging@gmail.com"))
+        intent.putExtra(Intent.EXTRA_SUBJECT, "Messaging Support Pre")
         intent.putExtra(Intent.EXTRA_TEXT, StringBuilder("\n\n")
             .append("\n\n--- Please write your message above this line ---\n\n")
             .append("Package: ${context.packageName}\n")

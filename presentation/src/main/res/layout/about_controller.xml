@@ -38,6 +38,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             app:title="@string/about_version_title"
+            android:visibility="gone"
             tools:summary="3.0.8" />
 
         <com.moez.QKSMS.common.widget.PreferenceView

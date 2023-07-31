@@ -63,7 +63,7 @@ class ChipsAdapter @Inject constructor() : QkAdapter<Recipient>() {
 
         holder.avatar.setRecipient(recipient)
         holder.name.text = recipient.contact?.name?.takeIf { it.isNotBlank() } ?: recipient.address
-        holder.labelNumber.text =recipient.contact?.getDefaultNumber().toString()
+      //  holder.labelNumber.text =recipient.contact?.getDefaultNumber()?
     }
 
     /**

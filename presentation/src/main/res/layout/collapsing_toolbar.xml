@@ -33,7 +33,7 @@
         app:expandedTitleMarginBottom="8dp"
         app:expandedTitleMarginEnd="24dp"
         app:expandedTitleMarginStart="24dp"
-        app:expandedTitleTextAppearance="@style/CollapsingToolbarExpandedText"
+        app:expandedTitleTextAppearance="@style/ToolbarText"
         app:layout_scrollFlags="scroll|exitUntilCollapsed">
 
         <androidx.appcompat.widget.Toolbar

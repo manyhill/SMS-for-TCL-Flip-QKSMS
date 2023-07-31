@@ -6,7 +6,7 @@
         android:id="@+id/attach_photo"
         android:icon="@drawable/ic_audiotrack_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_gallery_cd" />
+        android:title="From gallery" />
 
 
     <item

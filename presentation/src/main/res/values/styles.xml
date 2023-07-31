@@ -18,6 +18,7 @@
   -->
 <resources>
 
+
     <style name="TextPrimary">
         <item name="android:textColor">?android:attr/textColorPrimary</item>
         <item name="textSize">primary</item>

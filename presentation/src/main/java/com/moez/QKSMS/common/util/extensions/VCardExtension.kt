@@ -22,7 +22,7 @@ package com.moez.QKSMS.common.util.extensions
 import ezvcard.VCard
 
 fun VCard.getDisplayName(): String? {
-    return formattedName?.value
-            ?: telephoneNumbers?.firstOrNull()?.text
-            ?: emails?.firstOrNull()?.value
+    return (formattedName?.value + "\n" + telephoneNumbers?.firstOrNull()?.text)
+           // ?: telephoneNumbers?.firstOrNull()?.text
+          //  ?: emails?.firstOrNull()?.value
 }
