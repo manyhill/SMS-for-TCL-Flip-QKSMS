@@ -68,6 +68,7 @@ class VCardBinder @Inject constructor(colors: Colors, private val context: Conte
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe { displayName ->
                     holder.name?.text = displayName
+                   // holder.labelNumber.text =
                     holder.name.isVisible = displayName.isNotEmpty()
                 }
 
