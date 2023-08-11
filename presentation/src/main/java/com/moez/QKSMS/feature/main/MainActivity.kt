@@ -292,7 +292,7 @@ class MainActivity : QkThemedActivity(), MainView {
             is Inbox -> {
                 showBackButton(state.page.selected > 0)
                 if(state.page.selected>0){
-                    showOptionsDialog(false)
+                    showOptionsDialog(state.page is Archived,state.page.markPinned)
                 }
                 title = getString(R.string.main_title_selected, state.page.selected)
                 if (recyclerView.adapter !== conversationsAdapter) recyclerView.adapter =
@@ -314,7 +314,7 @@ class MainActivity : QkThemedActivity(), MainView {
                 showBackButton(state.page.selected > 0)
 
                 if(state.page.selected>0){
-                    showOptionsDialog(true)
+                    showOptionsDialog(state.page is Archived,state.page.markPinned)
                 }
 
                 title = when (state.page.selected != 0) {
@@ -518,15 +518,18 @@ class MainActivity : QkThemedActivity(), MainView {
         }
     }
 
-    private fun showOptionsDialog(isArchive: Boolean) {
+    private fun showOptionsDialog(isArchive: Boolean,markPinned: Boolean) {
         val listener = object : MainOptionsDialog.OnMainOptionsDialogItemClickListener {
-            override fun onArchiveMessageClicked() {
-                optionsItemIntent.onNext(R.id.archive)
+            override fun onArchiveMessageClicked(isArchive: Boolean) {
+               if(!isArchive)
+                   optionsItemIntent.onNext(R.id.archive)
+                else
+                    optionsItemIntent.onNext(R.id.unarchive)
             }
 
-            override fun onUnarchiveMessageClicked() {
-                optionsItemIntent.onNext(R.id.unarchive)
-            }
+//            override fun onUnarchiveMessageClicked() {
+//                optionsItemIntent.onNext(R.id.unarchive)
+//            }
 
             override fun onDeleteMessagesClicked() {
                 optionsItemIntent.onNext(R.id.delete)
@@ -536,9 +539,15 @@ class MainActivity : QkThemedActivity(), MainView {
                 optionsItemIntent.onNext(R.id.add)
             }
 
-            override fun onPinToTopClicked() {
+            override fun onPinToTopClicked(markPinned: Boolean) {
+                if(markPinned)
                 optionsItemIntent.onNext(R.id.pin)
+                else
+                    optionsItemIntent.onNext(R.id.unpin)
             }
+//            override fun onUnpinToTopClicked() {
+//                optionsItemIntent.onNext(R.id.unpin)
+//            }
 
             override fun onMarkUnreadClicked() {
                 optionsItemIntent.onNext(R.id.unread)
@@ -550,7 +559,7 @@ class MainActivity : QkThemedActivity(), MainView {
 
         }
 
-        val dialog = MainOptionsDialog(this@MainActivity, listener, isArchive)
+        val dialog = MainOptionsDialog(this@MainActivity, listener, isArchive,markPinned)
 
         dialog.setOnDismissListener {
             if (!(it as MainOptionsDialog).isClickDismissed) {

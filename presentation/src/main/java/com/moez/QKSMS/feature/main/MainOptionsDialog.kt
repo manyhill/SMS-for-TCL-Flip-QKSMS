@@ -8,12 +8,13 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.ListView
 import com.moez.QKSMS.R
-import com.moez.QKSMS.common.util.extensions.makeToast
+
 
 class MainOptionsDialog constructor(
     context: Context,
     private val listener: OnMainOptionsDialogItemClickListener,
-    private val isArchive: Boolean
+    private val isArchive: Boolean,
+    private val markPinned: Boolean
 ) : Dialog(context) {
 
     lateinit var listView: ListView
@@ -26,16 +27,23 @@ class MainOptionsDialog constructor(
         setCanceledOnTouchOutside(true)
 
         listView = findViewById(R.id.option_dialog_list_view)
+        var items: Array<String> = emptyArray()
+        var archiveOption="Archive"
+        var pinOptions="Pin to top"
+        if(isArchive) {    archiveOption="Unarchive"}
+        if(!markPinned){pinOptions="Unpin"}
 
-        val items = arrayOf(
-            "Archive",
-            "Unarchive",
-            "Delete",
-            "Add to contacts",
-            "Pin to top",
-            "Mark unread",
-            "Block"
-        )
+    items = arrayOf(
+
+        archiveOption,
+        "Delete",
+        "Add to contacts",
+        pinOptions,
+        "Mark unread",
+        "Block"
+    )
+
+
 
         val adapter: ArrayAdapter<String> =
             ArrayAdapter(context, R.layout.options_dialog_list_item, items)
@@ -53,19 +61,21 @@ class MainOptionsDialog constructor(
     private fun initClicks() {
         listView.setOnItemClickListener { parent, view, position, id ->
             when (position) {
-                0 -> listener.onArchiveMessageClicked()
+                0 -> listener.onArchiveMessageClicked(isArchive)
 
-                1 -> listener.onUnarchiveMessageClicked()
+            //    1 -> listener.onUnarchiveMessageClicked()
 
-                2 -> listener.onDeleteMessagesClicked()
+                1 -> listener.onDeleteMessagesClicked()
 
-                3 -> listener.onAddToContactsClicked()
+                2 -> listener.onAddToContactsClicked()
 
-                4 -> listener.onPinToTopClicked()
+                3 -> listener.onPinToTopClicked(markPinned)
 
-                5 -> listener.onMarkUnreadClicked()
+//                4 -> listener.onUnpinToTopClicked()
 
-                6 -> listener.onBlockClicked()
+                4 -> listener.onMarkUnreadClicked()
+
+                5 -> listener.onBlockClicked()
 
             }
             isClickDismissed=true
@@ -75,11 +85,12 @@ class MainOptionsDialog constructor(
 
 
     interface OnMainOptionsDialogItemClickListener {
-        fun onArchiveMessageClicked()
-        fun onUnarchiveMessageClicked()
+        fun onArchiveMessageClicked(isArchive: Boolean)
+        //fun onUnarchiveMessageClicked()
         fun onDeleteMessagesClicked()
         fun onAddToContactsClicked()
-        fun onPinToTopClicked()
+        fun onPinToTopClicked(markPinned: Boolean)
+//        fun onUnpinToTopClicked()
         fun onMarkUnreadClicked()
         fun onBlockClicked()
     }
