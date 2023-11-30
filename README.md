@@ -1,6 +1,6 @@
 
 
-# QKSMS
+# SMS for TCL Flip
 
 
 
