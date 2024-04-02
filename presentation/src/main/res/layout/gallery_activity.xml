@@ -69,4 +69,47 @@
 
     </androidx.appcompat.widget.Toolbar>
 
+    <androidx.appcompat.widget.LinearLayoutCompat
+        android:id="@+id/linearLayout_zoom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/tools_theme"
+        android:elevation="8dp"
+        android:gravity="bottom"
+        android:orientation="horizontal"
+
+        tools:backgroundTint="@color/tools_theme">
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/zoomin"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="start"
+            android:paddingStart="16dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:text="-"
+            android:textColor="@color/white"
+            android:textSize="16sp" />
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/zoomout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:gravity="end"
+            android:paddingTop="5dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="5dp"
+            android:text="+"
+            android:textColor="@color/white"
+            android:textSize="16sp" />
+
+    </androidx.appcompat.widget.LinearLayoutCompat>
+
 </FrameLayout>

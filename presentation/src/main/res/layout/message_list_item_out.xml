@@ -36,7 +36,13 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         tools:text="Tue at 11:39pm" />
-
+    <com.moez.QKSMS.common.widget.QkTextView
+        android:id="@+id/isMms"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="invisible"
+        android:text=""
+        tools:ignore="MissingConstraints" />
     <ImageView
         android:id="@+id/sim"
         android:layout_width="16dp"
@@ -70,6 +76,8 @@
         android:layout_marginEnd="12dp"
         android:gravity="end"
         android:nestedScrollingEnabled="false"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
         android:orientation="vertical"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
         app:layout_constrainedWidth="true"
@@ -92,6 +100,8 @@
         android:backgroundTint="?attr/bubbleColor"
         android:gravity="start|center_vertical"
         android:minHeight="36dp"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
         app:layout_constrainedWidth="true"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="1"

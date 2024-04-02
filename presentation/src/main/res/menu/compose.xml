@@ -40,7 +40,19 @@
         android:title="@string/menu_info"
         android:visible="false"
         app:showAsAction="always" />
+    <item
+        android:id="@+id/showDialog"
+        android:icon="@drawable/ic_content_copy_black_24dp"
+        android:title="Play"
+        android:visible="false"
+        app:showAsAction="ifRoom" />
 
+    <item
+        android:id="@+id/play"
+        android:icon="@drawable/ic_content_copy_black_24dp"
+        android:title="Play"
+        android:visible="false"
+        app:showAsAction="ifRoom" />
     <item
         android:id="@+id/details"
         android:icon="@drawable/ic_info_black_24dp"

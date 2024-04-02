@@ -6,10 +6,12 @@ import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.ListView
 import com.moez.QKSMS.R
+import kotlinx.android.synthetic.main.message_list_item_in.*
 
 class ComposeOptionsDialog constructor(
     context: Context,
-    private val listener: OnComposeOptionsDialogItemClickListener
+    private val listener: OnComposeOptionsDialogItemClickListener,
+    private val isMMS: Boolean
 ) : Dialog(context) {
 
 
@@ -24,9 +26,12 @@ class ComposeOptionsDialog constructor(
 
         listView = findViewById(R.id.option_dialog_list_view)
 
+        var option="Open Message"
+        if(isMMS) {    option="Open"}
         val items = arrayOf(
             "Copy Text",
             "Forward Message",
+           option,
             "Delete Message",
             "Save to Gallery",
             "Message Info",
@@ -48,13 +53,15 @@ class ComposeOptionsDialog constructor(
 
                 1 -> listener.onForwardMessageClicked()
 
-                2 -> listener.onDeleteMessagesClicked()
+                2 -> listener.onPlayClicked()
 
-                3 -> listener.onSaveClicked()
+                3 -> listener.onDeleteMessagesClicked()
 
-                4-> listener.onMessageInfoClicked()
+                4 -> listener.onSaveClicked()
 
-                5 -> listener.onMessageCallClicked()
+                5-> listener.onMessageInfoClicked()
+
+               6 -> listener.onMessageCallClicked()
 
 
 
@@ -76,6 +83,7 @@ class ComposeOptionsDialog constructor(
         fun onForwardMessageClicked()
         fun onMessageInfoClicked()
         fun onMessageCallClicked()
+        fun onPlayClicked()
         fun onSaveClicked()
     }
 

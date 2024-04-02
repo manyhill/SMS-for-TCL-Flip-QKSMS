@@ -24,17 +24,23 @@ import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.*
-import android.icu.text.DateFormat
 import android.media.CamcorderProfile
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
+import android.text.SpannableString
+import android.text.style.URLSpan
+import android.text.util.Linkify
 import android.view.*
+import android.widget.ArrayAdapter
 import android.widget.PopupMenu
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
+import androidx.core.text.util.LinkifyCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProviders
@@ -43,7 +49,6 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.flexbox.FlexboxLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
-import com.jakewharton.rxbinding2.view.visible
 import com.jakewharton.rxbinding2.widget.textChanges
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
@@ -53,7 +58,6 @@ import com.moez.QKSMS.common.util.extensions.*
 import com.moez.QKSMS.feature.compose.editing.ChipsAdapter
 import com.moez.QKSMS.feature.contacts.ContactsActivity
 import com.moez.QKSMS.model.Attachment
-import com.moez.QKSMS.model.Message
 import com.moez.QKSMS.model.Recipient
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
@@ -64,6 +68,7 @@ import io.reactivex.subjects.Subject
 import kotlinx.android.synthetic.main.compose_activity.*
 import kotlinx.android.synthetic.main.qk_dialog.*
 import kotlinx.android.synthetic.main.qk_dialog.view.*
+import kotlinx.android.synthetic.main.qkreply_activity.view.*
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -114,7 +119,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     override val messagesSelectedIntent by lazy {
         messageAdapter.selectionChanges
     }
-    override val cancelSendingIntent: Subject<Long> by lazy { messageAdapter.cancelSending }
+    override val cancelSendingIntent: Subject<Long> by lazy { messageAdapter.clicks }
     override val attachmentDeletedIntent: Subject<Attachment> by lazy { attachmentAdapter.attachmentDeleted }
     override val textChangedIntent by lazy { message.textChanges() }
     override val attachIntent by lazy {
@@ -161,6 +166,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     private var lastPasteClickedTime: Date? = null
 
     private var cameraDestination: Uri? = null
+
+    private var isMMS: Boolean = false
 
     private val sVideoDuration = intArrayOf(0, 5, 10, 15, 20, 30, 40, 50, 60, 90, 120)
 
@@ -264,7 +271,9 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             state.selectedMessages > 0 -> {
 
                 if (!(lastPasteClickedTime != null && (Date().time - lastPasteClickedTime!!.time) < 15000)) {
-                    showOptionsDialog()
+
+
+                    showOptionsDialog(state.isMMS)
                 } else {
                     lastPasteClickedTime = null
                 }
@@ -332,6 +341,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         messageList.setVisible(!state.editingMode || state.sendAsGroup || state.selectedChips.size == 1)
         messageAdapter.data = state.messages
         messageAdapter.highlight = state.searchSelectionId
+
+        isMMS=state.isMMS
 
         scheduledGroup.isVisible = state.scheduled != 0L
         scheduledTime.text = dateFormatter.getScheduledTimestamp(state.scheduled)
@@ -522,8 +533,9 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).type = "vnd.android.cursor.dir/video"
-        startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).type ="vnd.android.cursor.dir/video"
+
+                    startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
     }
 
     override fun setDraft(draft: String) {
@@ -720,7 +732,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 //            TextView tv_year = (TextView)view.findViewById(R.id.tv_year);
          //   toolbar.menu.findItem(R.id.call)?.isVisible =
             popUp.inflate(R.menu.attach_menu)
-            popUp.menu.findItem(R.id.cancel1)?.isVisible=false
+            popUp.menu.findItem(R.id.cancel)?.isVisible=false
             //messageAdapter.cancelSending.onNext(messageAdapter.getItemId(1))
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -728,6 +740,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             }
             popUp.setOnMenuItemClickListener { item ->
                 optionsItemIntent.onNext(item.itemId)
+
+
                 true
             }
             popUp.show()
@@ -789,8 +803,43 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         popUp.show()
 
     }
+    override fun showContactsDialog(contacts: MutableList<String>) {
+        val adapter: ArrayAdapter<String> =
+            ArrayAdapter(this, android.R.layout.simple_list_item_1,contacts)
 
-    private fun showOptionsDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Select")
+            .setAdapter(adapter) { _, position ->
+                val contact = contacts[position]
+
+                onLinkClicked(contact)
+                            }
+
+            .setNegativeButton("Cancel", null)
+
+            .show()
+    }
+    private fun onLinkClicked(link: String) {
+        val message = if (android.util.Patterns.PHONE.matcher(link).matches()) {
+            openDialerWithPhoneNumber(link)
+        } else if (android.util.Patterns.EMAIL_ADDRESS.matcher(link).matches()) {
+           openEmail(link)
+        } else {
+            "Link clicked: $link"
+        }
+        // Show the message using Toast or some other method
+    }
+    private fun openDialerWithPhoneNumber(phoneNumber: String) {
+        val dialIntent = Intent(Intent.ACTION_DIAL)
+        dialIntent.data = Uri.parse("tel:$phoneNumber")
+        startActivity(dialIntent)
+    }
+    private fun openEmail(email: String) {
+        val emailIntent = Intent(Intent.ACTION_SENDTO)
+        emailIntent.data = Uri.parse("mailto:$email")
+        startActivity(emailIntent)
+    }
+      fun showOptionsDialog(isMms: Boolean) {
 
 
         val listener = object : ComposeOptionsDialog.OnComposeOptionsDialogItemClickListener {
@@ -833,12 +882,16 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             }
 
             override fun onSaveClicked() {
+
                 optionsItemIntent.onNext(R.id.save)
+            }
+            override fun onPlayClicked() {
+                optionsItemIntent.onNext(R.id.play)
             }
 
         }
 
-        val dialog = ComposeOptionsDialog(this@ComposeActivity, listener)
+        val dialog = ComposeOptionsDialog(this@ComposeActivity, listener, isMMS)
 
         dialog.setOnDismissListener {
             if (!(it as ComposeOptionsDialog).isClickDismissed) {

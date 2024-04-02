@@ -68,6 +68,7 @@ import kotlinx.android.synthetic.main.message_list_item_in.sim
 import kotlinx.android.synthetic.main.message_list_item_in.simIndex
 import kotlinx.android.synthetic.main.message_list_item_in.status
 import kotlinx.android.synthetic.main.message_list_item_in.timestamp
+import kotlinx.android.synthetic.main.message_list_item_in.isMms
 import kotlinx.android.synthetic.main.message_list_item_in.view.*
 import kotlinx.android.synthetic.main.message_list_item_out.*
 import java.util.*
@@ -163,7 +164,7 @@ class MessagesAdapter @Inject constructor(
         }
 
         val partsAdapter = partsAdapterProvider.get()
-        partsAdapter.clicks.subscribe(partClicks)
+      //  partsAdapter.clicks.subscribe(partClicks)
         view.attachments.adapter = partsAdapter
         view.attachments.setRecycledViewPool(partsViewPool)
         view.body.forwardTouches(view)
@@ -174,6 +175,7 @@ class MessagesAdapter @Inject constructor(
                 when (toggleSelection(message.id, false)) {
                     true -> view.isActivated = isSelected(message.id)
                     false -> {
+
                         clicks.onNext(message.id)
                         expanded[message.id] = view.status.visibility != View.VISIBLE
                         notifyItemChanged(adapterPosition)
@@ -230,6 +232,8 @@ class MessagesAdapter @Inject constructor(
         // Bind the timestamp
         val timeSincePrevious = TimeUnit.MILLISECONDS.toMinutes(message.date - (previous?.date ?: 0))
         val subscription = subs.find { sub -> sub.subscriptionId == message.subId }
+
+       // holder.isMms.text=message.isMms().toString() //manyhill
 
         holder.timestamp.text = dateFormatter.getMessageTimestamp(message.date)
         holder.simIndex.text = subscription?.simSlotIndex?.plus(1)?.toString()

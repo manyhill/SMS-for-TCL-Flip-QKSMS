@@ -19,9 +19,10 @@
 package com.moez.QKSMS.feature.gallery
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
-import android.view.Menu
-import android.view.MenuItem
+import android.view.*
+import android.widget.PopupMenu
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isVisible
@@ -38,7 +39,12 @@ import dagger.android.AndroidInjection
 import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
+import kotlinx.android.synthetic.main.compose_activity.*
 import kotlinx.android.synthetic.main.gallery_activity.*
+import kotlinx.android.synthetic.main.gallery_activity.toolbar
+import kotlinx.android.synthetic.main.gallery_activity.toolbarSubtitle
+import kotlinx.android.synthetic.main.gallery_activity.toolbarTitle
+import kotlinx.android.synthetic.main.gallery_image_page.*
 import javax.inject.Inject
 
 class GalleryActivity : QkActivity(), GalleryView {
@@ -46,6 +52,9 @@ class GalleryActivity : QkActivity(), GalleryView {
     @Inject lateinit var dateFormatter: DateFormatter
     @Inject lateinit var viewModelFactory: ViewModelProvider.Factory
     @Inject lateinit var pagerAdapter: GalleryPagerAdapter
+    private lateinit var zoomIn : View
+    private lateinit var zoomOut : View
+    private var currentScale = 1.0f
 
     val partId by lazy { intent.getLongExtra("partId", 0L) }
 
@@ -60,7 +69,22 @@ class GalleryActivity : QkActivity(), GalleryView {
         setContentView(R.layout.gallery_activity)
         showBackButton(true)
         viewModel.bindView(this)
+zoomIn = findViewById(R.id.zoomin)
+        zoomOut=findViewById(R.id.zoomout)
 
+        zoomIn.setOnClickListener {
+            if(currentScale>1) {
+                currentScale -= 1f
+                image.setScale(currentScale, true)
+            }
+        }
+        zoomOut.setOnClickListener {
+        if(currentScale<9) {
+            currentScale += 1f
+            image.setScale(currentScale, true)
+        }
+        }
+       // gallery.requestFocus()
         pager.adapter = pagerAdapter
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -79,8 +103,22 @@ class GalleryActivity : QkActivity(), GalleryView {
                         }
             }
         })
+
+    }
+    private fun navigateLeft() {
+        image.scrollBy(-100, 0)
     }
 
+    private fun navigateRight() {
+        image.scrollBy(100, 0)
+    }
+    private fun navigateUp() {
+        image.scrollBy(0, -100)
+    }
+
+    private fun navigateDown() {
+        image.scrollBy(0, 100)
+    }
     fun onPageSelected(position: Int) {
         toolbarSubtitle.text = pagerAdapter.getItem(position)?.messages?.firstOrNull()?.date
                 ?.let(dateFormatter::getDetailedTimestamp)
@@ -88,6 +126,45 @@ class GalleryActivity : QkActivity(), GalleryView {
 
         pagerAdapter.getItem(position)?.run(pageChangedSubject::onNext)
     }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+
+
+        return when (event?.keyCode) {
+            KeyEvent.KEYCODE_SOFT_LEFT -> {
+                zoomIn.performClick()
+                true
+            }
+
+            KeyEvent.KEYCODE_SOFT_RIGHT -> {
+
+                    zoomOut.performClick()
+                true
+            }
+
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                navigateUp()
+            true}
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+
+                navigateDown()
+                true
+
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                navigateLeft()
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                navigateRight()
+                true
+            }
+
+
+            else -> super.onKeyUp(keyCode, event)
+        }
+    }
+
 
     override fun render(state: GalleryState) {
         toolbar.setVisible(state.navigationVisible)

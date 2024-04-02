@@ -361,7 +361,7 @@ class MessageRepositoryImpl @Inject constructor(
                 smsManager.carrierConfigValues.getInt(SmsManager.MMS_CONFIG_MAX_IMAGE_HEIGHT)
                     .takeIf { prefs.mmsSize.get() == -1 } ?: Int.MAX_VALUE
 
-            val carrierLimit = smsManager.carrierConfigValues.getInt(SmsManager.MMS_CONFIG_MAX_MESSAGE_SIZE)
+            val carrierLimit = 5000000 //smsManager.carrierConfigValues.getInt(SmsManager.MMS_CONFIG_MAX_MESSAGE_SIZE)
 
 
             val compressionLimit = when (prefs.mmsSize.get()) {

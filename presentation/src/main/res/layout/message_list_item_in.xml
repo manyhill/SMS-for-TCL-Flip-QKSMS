@@ -23,7 +23,13 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground">
-
+    <com.moez.QKSMS.common.widget.QkTextView
+        android:id="@+id/isMms"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="invisible"
+        android:text=""
+        tools:ignore="MissingConstraints" />
     <com.moez.QKSMS.common.widget.QkTextView
         android:id="@+id/timestamp"
         style="@style/TextSecondary"
@@ -69,6 +75,8 @@
         android:layout_marginEnd="6dp"
         android:nestedScrollingEnabled="false"
         android:orientation="vertical"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
         app:layout_constrainedWidth="true"
         app:layout_constraintEnd_toEndOf="parent"
@@ -96,6 +104,8 @@
         android:background="@drawable/message_only"
         android:gravity="start|center_vertical"
         android:minHeight="25dp"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
         app:layout_constrainedWidth="true"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="0"

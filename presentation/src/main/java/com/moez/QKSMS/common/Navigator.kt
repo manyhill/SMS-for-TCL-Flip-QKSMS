@@ -18,6 +18,7 @@
  */
 package com.moez.QKSMS.common
 
+import android.R
 import android.app.Activity
 import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
@@ -29,6 +30,8 @@ import android.provider.ContactsContract
 import android.provider.Settings
 import android.provider.Telephony
 import android.webkit.MimeTypeMap
+import android.widget.ArrayAdapter
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
 import com.moez.QKSMS.BuildConfig
 import com.moez.QKSMS.feature.backup.BackupActivity
@@ -269,11 +272,13 @@ class Navigator @Inject constructor(
     fun viewFile(file: File) {
         val data = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.name.split(".").last())
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(data, type)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if( type!="text/plain"  ) {
+            val intent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(data, type)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
-        startActivityExternal(intent)
+            startActivityExternal(intent)
+        }
     }
 
     fun shareFile(file: File) {

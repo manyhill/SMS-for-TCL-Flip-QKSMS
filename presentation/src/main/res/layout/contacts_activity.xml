@@ -68,7 +68,7 @@
                 android:backgroundTint="?attr/bubbleColor"
                 android:hint="@string/title_compose"
                 android:imeOptions="flagNoExtractUi"
-                android:inputType="textFilter|textNoSuggestions"
+                android:inputType="text"
                 android:maxLines="1"
                 android:paddingStart="16dp"
                 android:paddingEnd="40dp"

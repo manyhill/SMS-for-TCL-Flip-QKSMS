@@ -19,15 +19,19 @@
 package com.moez.QKSMS.feature.compose
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Vibrator
 import android.provider.ContactsContract
 import android.telephony.SmsMessage
+import android.text.util.Linkify
 import androidx.core.content.getSystemService
+import com.android.i18n.phonenumbers.PhoneNumberUtil
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkViewModel
 import com.moez.QKSMS.common.util.ClipboardUtils
+import com.moez.QKSMS.common.util.FileUtils.nothingToPlay
 import com.moez.QKSMS.common.util.FileUtils.nothingToSave
 import com.moez.QKSMS.common.util.FileUtils.saveImageToGallery
 import com.moez.QKSMS.common.util.FileUtils.saveVideoToGallery
@@ -35,10 +39,7 @@ import com.moez.QKSMS.common.util.MessageDetailsFormatter
 import com.moez.QKSMS.common.util.extensions.makeToast
 import com.moez.QKSMS.compat.SubscriptionManagerCompat
 import com.moez.QKSMS.compat.TelephonyCompat
-import com.moez.QKSMS.extensions.asObservable
-import com.moez.QKSMS.extensions.isImage
-import com.moez.QKSMS.extensions.isVideo
-import com.moez.QKSMS.extensions.mapNotNull
+import com.moez.QKSMS.extensions.*
 import com.moez.QKSMS.interactor.*
 import com.moez.QKSMS.manager.ActiveConversationManager
 import com.moez.QKSMS.manager.BillingManager
@@ -66,6 +67,7 @@ import timber.log.Timber
 import java.util.*
 import javax.inject.Inject
 import javax.inject.Named
+
 
 class ComposeViewModel @Inject constructor(
     @Named("query") private val query: String,
@@ -278,6 +280,8 @@ class ComposeViewModel @Inject constructor(
             .map { recipient -> recipient.address }.autoDisposable(view.scope())
             .subscribe { address -> navigator.makePhoneCall(address) }
 
+
+
         // Open the conversation settings if info button is clicked
         view.optionsItemIntent.filter { it == R.id.info }
             .withLatestFrom(conversation) { _, conversation -> conversation }
@@ -320,6 +324,8 @@ class ComposeViewModel @Inject constructor(
                     }
                 }
                 else {
+
+
                     context.nothingToSave()
                 }
             }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
@@ -391,10 +397,83 @@ class ComposeViewModel @Inject constructor(
             .doOnNext { message -> retrySending.execute(message.id) }.autoDisposable(view.scope())
             .subscribe()
 
-        // Media attachment clicks
+        // Retry sending
+        view.messageClickIntent.mapNotNull(messageRepo::getMessage)
+           // .filter { message -> message.isMms() }
+
+            .doOnNext {
+                          message ->
+
+//                     view.setDraft(message.getText()) }.autoDisposable(view.scope())
+//                    .subscribe { message ->
+//                        cancelMessage.execute(CancelDelayedMessage.Params(message.id, message.threadId))
+//                    }
+
+
+                for (part in message.parts) {
+                    part?.let { p ->
+                        if (p.isVideo() || p.isImage() ) {
+                            navigator.showMedia(part.id)
+
+                        }
+                        else {
+
+                           messageRepo.savePart(part.id)?.let(navigator::viewFile)
+                        }
+                }
+            }
+                val contacts = mutableListOf<String>()
+
+                val phonePattern = "(\\+\\d{1,2}\\s?)?\\(?\\d{3}\\)?[\\s.-]?\\d{3}[\\s.-]?\\d{4,5}"
+                val emailPattern = "([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\\.[a-zA-Z0-9_-]+)"
+
+                val phoneRegex = Regex(phonePattern)
+                val emailRegex = Regex(emailPattern)
+
+                val matches =  emailRegex.findAll(message.getText())+phoneRegex.findAll(message.getText() )
+               if (matches.count()>0) {
+                   for (match in matches) {
+                       val value = match.value
+                       contacts.add(value)
+                   }
+                   view.showContactsDialog(contacts)
+               }
+            }.autoDisposable(view.scope())
+         .subscribe()
+
+
+        // Media attachment clicks //can delete after delete open manyhill
+        view.optionsItemIntent.filter { it == R.id.play }
+            .withLatestFrom(view.messagesSelectedIntent) { _, messageIds ->
+                val messages = messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
+                val clickedMessage: Message = messages.first()
+
+                if (clickedMessage.isMms()) {
+                    for (part in clickedMessage.parts) {
+                        part?.let { p ->
+                            if (p.isVideo()) {
+                                navigator.showMedia(part.id)
+
+                            } else if (p.isImage()) {
+                                navigator.showMedia(part.id)
+                            }
+                            else {
+                                messageRepo.savePart(part.id)?.let(navigator::viewFile)
+                            }
+                        }
+                    }
+                }
+                else {
+                    context.nothingToPlay()
+                }
+            }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
+
         view.messagePartClickIntent.mapNotNull(messageRepo::getPart)
             .filter { part -> part.isImage() || part.isVideo() }.autoDisposable(view.scope())
-            .subscribe { part -> navigator.showMedia(part.id) }
+            .subscribe { part -> navigator.showMedia(part.id)
+                newState { copy(isMMS = true) }
+              }
+
 
         // Non-media attachment clicks
         view.messagePartClickIntent.mapNotNull(messageRepo::getPart)
@@ -405,6 +484,7 @@ class ComposeViewModel @Inject constructor(
                 } else {
                     view.requestStoragePermission()
                 }
+                newState { copy(isMMS = false) }
             }
 
         // Update the State when the message selected count changes
@@ -419,9 +499,13 @@ class ComposeViewModel @Inject constructor(
 
         // Cancel sending a message
         view.cancelSendingIntent.mapNotNull(messageRepo::getMessage)
-            .doOnNext { message -> view.setDraft(message.getText()) }.autoDisposable(view.scope())
+            .doOnNext { message ->
+                if(message.isSending() && message.date > System.currentTimeMillis())
+                view.setDraft(message.getText()) }
+            .autoDisposable(view.scope())
             .subscribe { message ->
-                cancelMessage.execute(CancelDelayedMessage.Params(message.id, message.threadId))
+                if(message.isSending() && message.date > System.currentTimeMillis())
+                { cancelMessage.execute(CancelDelayedMessage.Params(message.id, message.threadId))}
             }
 
         // Set the current conversation

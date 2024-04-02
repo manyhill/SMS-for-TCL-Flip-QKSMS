@@ -19,9 +19,13 @@
 package com.moez.QKSMS.feature.gallery
 
 import android.content.Context
+import android.icu.util.LocaleData.MeasurementSystem.SI
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import com.bumptech.glide.request.RequestOptions
+import com.bumptech.glide.request.target.Target
+import com.bumptech.glide.request.target.Target.SIZE_ORIGINAL
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.ExoPlayerFactory
 import com.google.android.exoplayer2.source.ExtractorMediaSource
@@ -73,10 +77,12 @@ class GalleryPagerAdapter @Inject constructor(private val context: Context) : Qk
                     javaClass.getDeclaredField("mMidScale").run {
                         isAccessible = true
                         setFloat(image.attacher, 1f)
+                       // attacher.setScale(attacher.getMaximumScale(), 300, 150, true);
                     }
                     javaClass.getDeclaredField("mMaxScale").run {
                         isAccessible = true
-                        setFloat(image.attacher, 3f)
+                        setFloat(image.attacher, 9f)
+                      //  attacher.setScale(attacher.getMaximumScale(), 400, 250, true);
                     }
                 }
             }
@@ -96,11 +102,13 @@ class GalleryPagerAdapter @Inject constructor(private val context: Context) : Qk
                 when (part.getUri().let(contentResolver::getType)) {
                     ContentType.IMAGE_GIF -> GlideApp.with(context)
                             .asGif()
-                            .load(part.getUri())
-                            .into(holder.image)
+                            .apply(RequestOptions().override(Target.SIZE_ORIGINAL))
+                        .load(part.getUri())
+                        .into(holder.image)
 
                     else -> GlideApp.with(context)
                             .asBitmap()
+                        .apply(RequestOptions().override(Target.SIZE_ORIGINAL))
                             .load(part.getUri())
                             .into(holder.image)
                 }

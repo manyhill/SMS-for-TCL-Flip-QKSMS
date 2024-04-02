@@ -15,6 +15,11 @@ object FileUtils {
         makeToast("Nothing to save")
 
     }
+    fun Context.nothingToPlay()
+    {
+        makeToast("Nothing to play")
+
+    }
     fun Context.saveImageToGallery(imageUri: Uri) {
         val contentResolver = contentResolver
         var inputStream: InputStream? = null

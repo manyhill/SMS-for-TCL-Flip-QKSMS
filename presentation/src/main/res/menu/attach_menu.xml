@@ -32,7 +32,7 @@
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/info_title" />
     <item
-        android:id="@+id/cancel1"
+        android:id="@+id/cancel"
         android:icon="@drawable/ic_event_black_24dp"
         android:iconTint="?android:attr/textColorSecondary"
         android:title="Cancel Message" />
