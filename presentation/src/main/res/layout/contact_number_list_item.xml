@@ -26,9 +26,12 @@
 
     <com.moez.QKSMS.common.widget.QkTextView
         android:id="@+id/type"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_weight="0.42"
+        android:ellipsize="end"
         android:gravity="center_vertical"
+        android:maxLines="1"
         android:textColor="?android:attr/textColorTertiary"
         android:textStyle="bold"
         app:textSize="secondary"
@@ -38,9 +41,11 @@
         android:id="@+id/address"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="4dp"
         android:layout_weight="1"
+        android:ellipsize="end"
         android:gravity="center_vertical"
+        android:maxLines="1"
         android:textColor="?android:attr/textColorTertiary"
         app:textSize="secondary"
         tools:text="(123) 456-7890" />

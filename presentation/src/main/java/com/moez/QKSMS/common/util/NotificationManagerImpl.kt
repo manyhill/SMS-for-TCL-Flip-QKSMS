@@ -20,7 +20,7 @@ package com.moez.QKSMS.common.util
 
 import android.app.Notification
 import android.app.NotificationChannel
-import android.app.NotificationManager
+import android.app.NotificationManager as AndroidNotificationManager
 import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.Context
@@ -57,6 +57,7 @@ import com.moez.QKSMS.util.GlideApp
 import com.moez.QKSMS.util.PhoneNumberUtils
 import com.moez.QKSMS.util.Preferences
 import com.moez.QKSMS.util.tryOrNull
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -78,7 +79,7 @@ class NotificationManagerImpl @Inject constructor(
         val VIBRATE_PATTERN = longArrayOf(0, 200, 0, 200)
     }
 
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as AndroidNotificationManager
 
     init {
         // Make sure the default channel has been initialized
@@ -382,12 +383,17 @@ class NotificationManagerImpl @Inject constructor(
 
         // Only proceed if the android version supports notification channels, and the channel hasn't
         // already been created
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || getNotificationChannel(threadId) != null) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+
+        val channelId = buildNotificationChannelId(threadId)
+        if (notificationManager.getNotificationChannel(channelId) != null) {
             return
         }
 
         val channel = when (threadId) {
-            0L -> NotificationChannel(DEFAULT_CHANNEL_ID, "Default", NotificationManager.IMPORTANCE_HIGH).apply {
+            0L -> NotificationChannel(DEFAULT_CHANNEL_ID, "Default", AndroidNotificationManager.IMPORTANCE_HIGH).apply {
                 enableLights(true)
                 lightColor = Color.WHITE
                 enableVibration(true)
@@ -396,23 +402,96 @@ class NotificationManagerImpl @Inject constructor(
 
             else -> {
                 val conversation = conversationRepo.getConversation(threadId) ?: return
-                val channelId = buildNotificationChannelId(threadId)
                 val title = conversation.getTitle()
-                NotificationChannel(channelId, title, NotificationManager.IMPORTANCE_HIGH).apply {
-                    enableLights(true)
+                val importance = if (prefs.notifications(threadId).get()) {
+                    AndroidNotificationManager.IMPORTANCE_HIGH
+                } else {
+                    AndroidNotificationManager.IMPORTANCE_NONE
+                }
+
+                NotificationChannel(channelId, title, importance).apply {
+                    enableLights(importance != AndroidNotificationManager.IMPORTANCE_NONE)
                     lightColor = Color.WHITE
-                    enableVibration(true)
+                    enableVibration(importance != AndroidNotificationManager.IMPORTANCE_NONE)
                     vibrationPattern = VIBRATE_PATTERN
-                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                    setSound(prefs.ringtone().get().let(Uri::parse), AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build())
+                    lockscreenVisibility = if (importance != AndroidNotificationManager.IMPORTANCE_NONE) {
+                        Notification.VISIBILITY_PUBLIC
+                    } else {
+                        Notification.VISIBILITY_SECRET
+                    }
+                    if (importance != AndroidNotificationManager.IMPORTANCE_NONE) {
+                        setSound(prefs.ringtone(threadId).get().let(Uri::parse), AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build())
+                    } else {
+                        setSound(null, null)
+                    }
                 }
             }
         }
 
         notificationManager.createNotificationChannel(channel)
+    }
+
+    override fun muteConversation(threadId: Long) {
+        if (threadId == 0L) {
+            return
+        }
+
+        prefs.notifications(threadId).set(false)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            prefs.notificationChannelVersion(threadId).set(prefs.notificationChannelVersion(threadId).get() + 1)
+            deleteThreadNotificationChannels(threadId)
+            createNotificationChannel(threadId)
+        }
+
+        notificationManager.cancel(threadId.toInt())
+        notificationManager.cancel(threadId.toInt() + 100000)
+    }
+
+    override fun unmuteConversation(threadId: Long) {
+        if (threadId == 0L) {
+            return
+        }
+
+        prefs.notifications(threadId).set(true)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            prefs.notificationChannelVersion(threadId).set(prefs.notificationChannelVersion(threadId).get() + 1)
+            deleteThreadNotificationChannels(threadId)
+
+            createNotificationChannel(threadId)
+        }
+    }
+
+    override fun isConversationMuted(threadId: Long): Boolean {
+        if (threadId == 0L) return false
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = getNotificationChannel(threadId)
+            if (channel != null) {
+                val muted = channel.importance == AndroidNotificationManager.IMPORTANCE_NONE
+                val prefEnabled = prefs.notifications(threadId).get()
+                val shouldBeEnabled = !muted
+
+                if (prefEnabled != shouldBeEnabled) {
+                    prefs.notifications(threadId).set(shouldBeEnabled)
+                }
+
+                return muted
+            }
+        }
+
+        return !prefs.notifications(threadId).get()
+    }
+
+    override fun buildNotificationChannelId(threadId: Long): String {
+        return when (threadId) {
+            0L -> DEFAULT_CHANNEL_ID
+            else -> "notifications_${threadId}_v${prefs.notificationChannelVersion(threadId).get()}"
+        }
     }
 
     /**
@@ -427,6 +506,17 @@ class NotificationManagerImpl @Inject constructor(
         }
 
         return null
+    }
+
+    private fun deleteThreadNotificationChannels(threadId: Long) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || threadId == 0L) return
+
+        val prefix = "notifications_${threadId}_"
+        notificationManager.notificationChannels
+            .filter { channel -> channel.id == "notifications_$threadId" || channel.id.startsWith(prefix) }
+            .forEach { channel ->
+                notificationManager.deleteNotificationChannel(channel.id)
+            }
     }
 
     /**
@@ -446,19 +536,14 @@ class NotificationManagerImpl @Inject constructor(
     /**
      * Formats a notification channel id for a given thread id, whether the channel exists or not
      */
-    override fun buildNotificationChannelId(threadId: Long): String {
-        return when (threadId) {
-            0L -> DEFAULT_CHANNEL_ID
-            else -> "notifications_$threadId"
-        }
-    }
+
 
     override fun getNotificationForBackup(): NotificationCompat.Builder {
         if (Build.VERSION.SDK_INT >= 26) {
             val name = context.getString(R.string.backup_notification_channel_name)
-            val importance = NotificationManager.IMPORTANCE_LOW
+            val importance = AndroidNotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(BACKUP_RESTORE_CHANNEL_ID, name, importance)
-            val notificationManager = context.getSystemService(NotificationManager::class.java)
+            val notificationManager = context.getSystemService(AndroidNotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
 

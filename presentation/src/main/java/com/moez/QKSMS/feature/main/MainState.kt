@@ -40,6 +40,7 @@ sealed class MainPage
 data class Inbox(
     val search: Boolean = false,
     val addContact: Boolean = false,
+    val markMuted: Boolean = false,
     val markPinned: Boolean = true,
     val markRead: Boolean = false,
     val data: RealmResults<Conversation>? = null,
@@ -53,6 +54,7 @@ data class Searching(
 
 data class Archived(
     val addContact: Boolean = false,
+    val markMuted: Boolean = false,
     val markPinned: Boolean = true,
     val markRead: Boolean = false,
     val data: RealmResults<Conversation>? = null,

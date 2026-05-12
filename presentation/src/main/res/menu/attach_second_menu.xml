@@ -8,15 +8,16 @@
         android:title="@string/compose_gallery_cd" />
 
     <item
+        android:id="@+id/audio_menu"
+        android:icon="@drawable/ic_audiotrack_black_24dp"
+        android:iconTint="?android:attr/textColorSecondary"
+        android:title="@string/compose_audio_cd" />
+
+    <item
         android:id="@+id/video_menu"
         android:icon="@drawable/ic_baseline_videocam_24"
         android:iconTint="?android:attr/textColorSecondary"
         android:title="@string/compose_video_cd" />
-    <item
-        android:id="@+id/attach_audio"
-        android:icon="@drawable/ic_audiotrack_black_24dp"
-        android:iconTint="?android:attr/textColorSecondary"
-        android:title="@string/compose_audio_cd" />
 
     <item
         android:id="@+id/attach_contact"

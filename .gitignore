@@ -1,3 +1,19 @@
+# Local reverse-engineering / scratch folders
+_fpmessaging_jadx/
+_gcsdialer_apktool/
+_gcsdialer_jadx/
+_superwork/
+_tt9_60/
+grocery-voice-mvp/
+
+# Local tools
+apktool_*.jar
+
+# APK signing leftovers
+*.apk.idsig
+
+# TT9 exports / local CSV exports
+tt9-added-words-export--*.csv
 # Built application files
 *.apk
 *.ap_

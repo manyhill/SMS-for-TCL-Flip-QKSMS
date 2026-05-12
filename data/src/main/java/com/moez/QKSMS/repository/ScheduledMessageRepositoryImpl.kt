@@ -23,6 +23,8 @@ import io.realm.Realm
 import io.realm.RealmList
 import io.realm.RealmResults
 import javax.inject.Inject
+import com.moez.QKSMS.util.RealmProvider
+
 
 class ScheduledMessageRepositoryImpl @Inject constructor() : ScheduledMessageRepository {
 
@@ -47,14 +49,14 @@ class ScheduledMessageRepositoryImpl @Inject constructor() : ScheduledMessageRep
     }
 
     override fun getScheduledMessages(): RealmResults<ScheduledMessage> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
                 .where(ScheduledMessage::class.java)
                 .sort("date")
                 .findAll()
     }
 
     override fun getScheduledMessage(id: Long): ScheduledMessage? {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
                 .apply { refresh() }
                 .where(ScheduledMessage::class.java)
                 .equalTo("id", id)
@@ -62,7 +64,7 @@ class ScheduledMessageRepositoryImpl @Inject constructor() : ScheduledMessageRep
     }
 
     override fun deleteScheduledMessage(id: Long) {
-        Realm.getDefaultInstance()
+        RealmProvider.get()
                 .apply { refresh() }
                 .use { realm ->
                     val message = realm.where(ScheduledMessage::class.java)

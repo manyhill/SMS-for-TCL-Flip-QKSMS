@@ -25,6 +25,7 @@ import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkViewModel
 import com.moez.QKSMS.extensions.mapNotNull
+import com.moez.QKSMS.manager.NotificationManager
 import com.moez.QKSMS.repository.ConversationRepository
 import com.moez.QKSMS.util.Preferences
 import com.uber.autodispose.android.lifecycle.scope
@@ -41,6 +42,7 @@ class NotificationPrefsViewModel @Inject constructor(
     private val context: Context,
     private val conversationRepo: ConversationRepository,
     private val navigator: Navigator,
+    private val notificationManager: NotificationManager,
     private val prefs: Preferences
 ) : QkViewModel<NotificationPrefsView, NotificationPrefsState>(NotificationPrefsState(threadId = threadId)) {
 
@@ -107,7 +109,13 @@ class NotificationPrefsViewModel @Inject constructor(
                     when (it.id) {
                         R.id.notificationsO -> navigator.showNotificationChannel(threadId)
 
-                        R.id.notifications -> notifications.set(!notifications.get())
+                        R.id.notifications -> {
+                            if (notificationManager.isConversationMuted(threadId)) {
+                                notificationManager.unmuteConversation(threadId)
+                            } else {
+                                notificationManager.muteConversation(threadId)
+                            }
+                        }
 
                         R.id.previews -> view.showPreviewModeDialog()
 

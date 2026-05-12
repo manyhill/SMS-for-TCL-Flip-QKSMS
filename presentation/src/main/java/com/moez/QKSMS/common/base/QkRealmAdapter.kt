@@ -1,129 +1,200 @@
-/*
- * Copyright (C) 2017 Moez Bhatti <moez.bhatti@gmail.com>
- *
- * This file is part of QKSMS.
- *
- * QKSMS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * QKSMS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with QKSMS.  If not, see <http://www.gnu.org/licenses/>.
- */
 package com.moez.QKSMS.common.base
 
 import android.view.View
 import androidx.recyclerview.widget.RecyclerView
-import com.moez.QKSMS.common.util.extensions.setVisible
 import io.reactivex.subjects.BehaviorSubject
 import io.reactivex.subjects.Subject
-import io.realm.OrderedRealmCollection
-import io.realm.RealmList
-import io.realm.RealmModel
-import io.realm.RealmRecyclerViewAdapter
-import io.realm.RealmResults
+import io.realm.*
 import timber.log.Timber
 
-abstract class QkRealmAdapter<T : RealmModel> : RealmRecyclerViewAdapter<T, QkViewHolder>(null, true) {
+/**
+ * Drop-in replacement for the old RealmRecyclerViewAdapter-based QkRealmAdapter.
+ * - No external "realm-android-adapters" dependency.
+ * - Supports RealmResults<T> and RealmList<T>.
+ * - Fine-grained updates via OrderedRealmCollectionChangeListener.
+ * - Keeps the same API: emptyView, updateData(...), getItem(...), selection helpers.
+ */
+abstract class QkRealmAdapter<T : RealmModel> : RecyclerView.Adapter<QkViewHolder>() {
 
-    /**
-     * This view can be set, and the adapter will automatically control the visibility of this view
-     * based on the data
-     */
+    // ---- Public API kept the same -------------------------------------------------------------
+
+    /** This view's visibility is controlled automatically based on data loaded/empty state. */
     var emptyView: View? = null
         set(value) {
             if (field === value) return
-
             field = value
-            value?.setVisible(data?.isLoaded == true && data?.isEmpty() == true)
+            val d = data
+            value?.visibility = if (d?.isLoaded == true && d.isEmpty()) View.VISIBLE else View.GONE
         }
-
-    private val emptyListener: (OrderedRealmCollection<T>) -> Unit = { data ->
-        emptyView?.setVisible(data.isLoaded && data.isEmpty())
-    }
 
     val selectionChanges: Subject<List<Long>> = BehaviorSubject.create()
+    private var selection: List<Long> = emptyList()
 
-    private var selection = listOf<Long>()
-
-    /**
-     * Toggles the selected state for a particular view
-     *
-     * If we are currently in selection mode (we have an active selection), then the state will
-     * toggle. If we are not in selection mode, then we will only toggle if [force]
-     */
-    protected fun toggleSelection(id: Long, force: Boolean = true): Boolean {
+    /** Toggle a selection id. If force=false and not in selection mode, it won't toggle. */
+    protected fun toggleSelection(id: Long, force: Boolean = true, allowAdding: Boolean = true): Boolean {
         if (!force && selection.isEmpty()) return false
-
-        selection = when (selection.contains(id)) {
-            true -> selection - id
-            false -> selection + id
-        }
-
+        if (!allowAdding && selection.isNotEmpty() && id !in selection) return false
+        selection = if (id in selection) selection - id else selection + id
         selectionChanges.onNext(selection)
         return true
     }
 
-    protected fun isSelected(id: Long): Boolean {
-        return selection.contains(id)
-    }
+    protected fun isSelected(id: Long): Boolean = id in selection
 
-    fun clearSelection() {
-        selection = listOf()
+    protected fun hasSelection(): Boolean = selection.isNotEmpty()
+
+    fun getSelection(): List<Long> = selection
+
+    protected fun selectOnly(id: Long) {
+        selection = listOf(id)
         selectionChanges.onNext(selection)
         notifyDataSetChanged()
     }
 
-    override fun getItem(index: Int): T? {
+    fun clearSelection() {
+        selection = emptyList()
+        selectionChanges.onNext(selection)
+        notifyDataSetChanged()
+    }
+
+    /** Kept for call sites that used to do super.getItem(...). */
+    open fun getItem(index: Int): T? {
         if (index < 0) {
             Timber.w("Only indexes >= 0 are allowed. Input was: $index")
             return null
         }
-
-        return super.getItem(index)
+        val d = data ?: return null
+        return if (index < d.size) d[index] else null
     }
 
-    override fun updateData(data: OrderedRealmCollection<T>?) {
-        if (getData() === data) return
+    /** Kept for call sites that used to do super.updateData(...). */
+    open fun updateData(newData: OrderedRealmCollection<T>?) {
+        if (data === newData) return
 
-        removeListener(getData())
-        addListener(data)
+        // detach from old
+        removeListeners(data)
 
-        data?.run(emptyListener)
+        data = newData
 
-        super.updateData(data)
+        // update empty state immediately
+        newData?.let {
+            emptyView?.visibility = if (it.isLoaded && it.isEmpty()) View.VISIBLE else View.GONE
+        }
+
+        // attach to new
+        addListeners(newData)
+
+        // refresh UI once (fine-grained updates will handle subsequent changes)
+        notifyDataSetChanged()
     }
+
+    // ---- RecyclerView.Adapter lifecycle -------------------------------------------------------
 
     override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
         super.onAttachedToRecyclerView(recyclerView)
-        addListener(data)
-
+        addListeners(data)
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        removeListeners(data)
         super.onDetachedFromRecyclerView(recyclerView)
-        removeListener(data)
     }
 
-    private fun addListener(data: OrderedRealmCollection<T>?) {
-        when (data) {
-            is RealmResults<T> -> data.addChangeListener(emptyListener)
-            is RealmList<T> -> data.addChangeListener(emptyListener)
+    override fun getItemCount(): Int = data?.size ?: 0
 
+    // ---- Internal -----------------------------------------------------------------------------
+
+    /** We keep data here; mirrors the old adapter’s idea of holding the collection. */
+     var data: OrderedRealmCollection<T>? = null
+        private set
+
+    // Empty-state listeners (simple)
+    private val emptyResultsListener = RealmChangeListener<RealmResults<T>> { d ->
+        emptyView?.visibility = if (d.isLoaded && d.isEmpty()) View.VISIBLE else View.GONE
+    }
+    private val emptyListListener = RealmChangeListener<RealmList<T>> { d ->
+        emptyView?.visibility = if (d.isLoaded && d.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    // Fine-grained change listeners
+    private val resultsListener =
+        OrderedRealmCollectionChangeListener<RealmResults<T>> { _, changes ->
+            applyFineGrainedChanges(changes)
+        }
+
+    private val listListener =
+        OrderedRealmCollectionChangeListener<RealmList<T>> { _, changes ->
+            applyFineGrainedChanges(changes)
+        }
+
+    private fun addListeners(d: OrderedRealmCollection<T>?) {
+        when (d) {
+            is RealmResults<T> -> {
+                if (!d.canReceiveChangeNotifications()) return
+                try {
+                    d.addChangeListener(emptyResultsListener)
+                    d.addChangeListener(resultsListener)
+                } catch (error: IllegalStateException) {
+                    Timber.d(error, "Skipping RealmResults listeners for non-live collection")
+                }
+            }
+            is RealmList<T> -> {
+                if (!d.canReceiveChangeNotifications()) return
+                try {
+                    d.addChangeListener(emptyListListener)
+                    d.addChangeListener(listListener)
+                } catch (error: IllegalStateException) {
+                    Timber.d(error, "Skipping RealmList listeners for non-live collection")
+                }
+            }
         }
     }
 
-    private fun removeListener(data: OrderedRealmCollection<T>?) {
-        when (data) {
-            is RealmResults<T> -> data.removeChangeListener(emptyListener)
-            is RealmList<T> -> data.removeChangeListener(emptyListener)
+    private fun removeListeners(d: OrderedRealmCollection<T>?) {
+        when (d) {
+            is RealmResults<T> -> {
+                if (!d.canReceiveChangeNotifications()) return
+                try {
+                    d.removeChangeListener(emptyResultsListener)
+                    d.removeChangeListener(resultsListener)
+                } catch (error: IllegalStateException) {
+                    Timber.d(error, "Skipping RealmResults listener removal for non-live collection")
+                }
+            }
+            is RealmList<T> -> {
+                if (!d.canReceiveChangeNotifications()) return
+                try {
+                    d.removeChangeListener(emptyListListener)
+                    d.removeChangeListener(listListener)
+                } catch (error: IllegalStateException) {
+                    Timber.d(error, "Skipping RealmList listener removal for non-live collection")
+                }
+            }
         }
     }
 
+    private fun RealmResults<T>.canReceiveChangeNotifications(): Boolean {
+        return isManaged && isValid && !isFrozen
+    }
+
+    private fun RealmList<T>.canReceiveChangeNotifications(): Boolean {
+        return isManaged && isValid && !isFrozen
+    }
+
+    private fun applyFineGrainedChanges(changes: OrderedCollectionChangeSet) {
+        // Deletions first (reverse order) to keep indices valid
+        val dels = changes.deletionRanges
+        for (i in dels.indices.reversed()) {
+            val r = dels[i]
+            notifyItemRangeRemoved(r.startIndex, r.length)
+        }
+        // Insertions
+        for (r in changes.insertionRanges) {
+            notifyItemRangeInserted(r.startIndex, r.length)
+        }
+        // Modifications
+        for (r in changes.changeRanges) {
+            notifyItemRangeChanged(r.startIndex, r.length)
+        }
+    }
 }

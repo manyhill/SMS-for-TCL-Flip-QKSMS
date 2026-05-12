@@ -93,20 +93,21 @@ fun View.forwardTouches(parent: View) {
     }
 
     setOnTouchListener { v, event ->
-        parent.onTouchEvent(event)
+        if (event.action == MotionEvent.ACTION_DOWN) {
+            isLongClick = false
+        }
+
+        val handledByParent = parent.onTouchEvent(event)
 
         when {
             event.action == MotionEvent.ACTION_UP && isLongClick -> {
-                isLongClick = true
                 true
             }
 
-            event.action == MotionEvent.ACTION_DOWN -> {
-                isLongClick = false
-                v.onTouchEvent(event)
+            else -> {
+                val handledBySelf = v.onTouchEvent(event)
+                handledByParent || handledBySelf
             }
-
-            else -> v.onTouchEvent(event)
         }
     }
 }

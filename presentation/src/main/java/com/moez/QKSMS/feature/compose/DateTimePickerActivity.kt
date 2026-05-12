@@ -194,14 +194,16 @@ class DateTimePickerActivity : AppCompatActivity() {
             selectedHour = currentHour24
             hour_picker.displayedValues = null
         } else {
-            val currentHour12 = calendar.get(Calendar.HOUR)
+            val currentHour12 = calendar.get(Calendar.HOUR).let { hour ->
+                if (hour == 0) 12 else hour
+            }
             val currentAmPm = calendar.get(Calendar.AM_PM)
             hour_picker.minValue = 1
             hour_picker.maxValue = 12
             hour_picker.value = currentHour12
             selectedHour = currentHour12
 
-            val amPmDisplayValues = arrayOf("PM", "AM")
+            val amPmDisplayValues = arrayOf("AM", "PM")
             am_pm_picker.minValue = 0
             am_pm_picker.maxValue = 1
             am_pm_picker.displayedValues = amPmDisplayValues
@@ -224,8 +226,12 @@ class DateTimePickerActivity : AppCompatActivity() {
         if (is24HourFormat) {
             calendar.set(Calendar.HOUR_OF_DAY, selectedHour)
         } else {
-            val calendarHour = if (amPm == 0) selectedHour else selectedHour + 12
-            calendar.set(Calendar.HOUR, calendarHour)
+            val hourOfDay = when (amPm) {
+                Calendar.AM -> if (selectedHour == 12) 0 else selectedHour
+                Calendar.PM -> if (selectedHour == 12) 12 else selectedHour + 12
+                else -> selectedHour
+            }
+            calendar.set(Calendar.HOUR_OF_DAY, hourOfDay)
         }
 
         calendar.set(Calendar.MINUTE, selectedMinute)

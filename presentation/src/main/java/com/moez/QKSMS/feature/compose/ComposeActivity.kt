@@ -17,14 +17,18 @@
  * along with QKSMS.  If not, see <http://www.gnu.org/licenses/>.
  */
 package com.moez.QKSMS.feature.compose
-
+import android.graphics.Rect
 import android.Manifest
 import android.animation.LayoutTransition
 import android.app.Activity
 import android.app.DatePickerDialog
+import android.app.Dialog
 import android.app.TimePickerDialog
 import android.content.*
+import android.content.pm.PackageManager
+import android.graphics.drawable.ColorDrawable
 import android.media.CamcorderProfile
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -33,15 +37,21 @@ import android.provider.MediaStore
 import android.text.SpannableString
 import android.text.style.URLSpan
 import android.text.util.Linkify
+import android.util.Log
 import android.view.*
 import android.widget.ArrayAdapter
+import android.widget.ListView
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.text.util.LinkifyCompat
 import androidx.core.view.isVisible
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProviders
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -55,25 +65,35 @@ import com.moez.QKSMS.common.Navigator
 import com.moez.QKSMS.common.base.QkThemedActivity
 import com.moez.QKSMS.common.util.DateFormatter
 import com.moez.QKSMS.common.util.extensions.*
+import com.moez.QKSMS.databinding.ComposeActivityBinding
 import com.moez.QKSMS.feature.compose.editing.ChipsAdapter
 import com.moez.QKSMS.feature.contacts.ContactsActivity
+import com.moez.QKSMS.extensions.*
 import com.moez.QKSMS.model.Attachment
+import com.moez.QKSMS.model.Message
 import com.moez.QKSMS.model.Recipient
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
 import dagger.android.AndroidInjection
 import io.reactivex.Observable
+import io.reactivex.subjects.BehaviorSubject
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
-import kotlinx.android.synthetic.main.compose_activity.*
-import kotlinx.android.synthetic.main.qk_dialog.*
-import kotlinx.android.synthetic.main.qk_dialog.view.*
-import kotlinx.android.synthetic.main.qkreply_activity.view.*
 import java.text.SimpleDateFormat
+import java.io.File
 import java.util.*
 import javax.inject.Inject
+import timber.log.Timber
+
+private const val MAX_SMOOTH_SCROLL_MESSAGES = 20
 
 class ComposeActivity : QkThemedActivity(), ComposeView {
+
+    private enum class AudioRecordingState {
+        IDLE,
+        RECORDING,
+        RECORDED
+    }
 
     companion object {
         private const val SelectContactRequestCode = 0
@@ -85,7 +105,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         private const val RecordAudioRequestCode = 6
         private const val RecordVideoRequestCode = 7
         private const val DateTimePickerRequestCode = 8
-
+        private const val RecordAudioPermissionRequestCode = 9
 
         private const val CameraDestinationKey = "camera_destination"
     }
@@ -114,14 +134,17 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     override val menuReadyIntent: Observable<Unit> = menu.map { }
     override val optionsItemIntent: Subject<Int> = PublishSubject.create()
     override val sendAsGroupIntent by lazy { sendAsGroupBackground.clicks() }
-    override val messageClickIntent: Subject<Long> by lazy { messageAdapter.clicks }
-    override val messagePartClickIntent: Subject<Long> by lazy { messageAdapter.partClicks }
+    override val messageClickIntent: Subject<Long> = PublishSubject.create()
+    override val messagePartClickIntent: Subject<Long> = PublishSubject.create()
     override val messagesSelectedIntent by lazy {
         messageAdapter.selectionChanges
     }
-    override val cancelSendingIntent: Subject<Long> by lazy { messageAdapter.clicks }
+    override val messageOptionsSelectionIntent: Subject<List<Long>> = BehaviorSubject.create()
+    override val messageOptionActionIntent: Subject<ComposeView.MessageOptionAction> = PublishSubject.create()
+    override val cancelSendingIntent: Subject<Long> by lazy { messageAdapter.cancelSending }
     override val attachmentDeletedIntent: Subject<Attachment> by lazy { attachmentAdapter.attachmentDeleted }
-    override val textChangedIntent by lazy { message.textChanges() }
+    override val textChangedIntent by lazy { message.textChanges().filter { !composeSearchMode } }
+    override val searchQueryIntent: Subject<String> = PublishSubject.create()
     override val attachIntent by lazy {
         Observable.merge(
             attach.clicks(), attachingBackground.clicks()
@@ -149,9 +172,11 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     override val audioSelectedIntent: Subject<Uri> = PublishSubject.create()
     override val videoSelectedIntent: Subject<Uri> = PublishSubject.create()
 
-    //    override val sendIntent by lazy { send.clicks() }
     override val sendIntent by lazy {
-        send_tv.clicks()
+        sendTv.clicks().doOnNext {
+            Log.d("QK-COMPOSE", "sendTvClick textBlank=${message.text.isNullOrBlank()}")
+            pendingFocusNewestSentMessage = true
+        }
     }
 
     override val viewQksmsPlusIntent: Subject<Unit> = PublishSubject.create()
@@ -168,24 +193,137 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     private var cameraDestination: Uri? = null
 
     private var isMMS: Boolean = false
+    private var lastAttachingState: Boolean? = null
+    private var optionsDialogShownForSelection = false
+    private var lastFocusedMessageId: Long? = null
+    private var pendingRestoreMessageFocusOnResume = false
+    private var lastRenderedLatestMessageId: Long? = null
+    private var selectedMessageCount = 0
+    private var pendingFocusNewestSentMessage = false
+    private var pendingAudioRecording = false
+    private var pendingForceComposeFocusOnResume = false
+    private var initialMessageLayoutThreadId: Long? = null
+    var currentThreadId = 0L
+    private var audioRecorder: MediaRecorder? = null
+    private var recordingAudioFile: File? = null
+    private var audioRecordingDialog: AlertDialog? = null
+    private var compactMenuDialog: Dialog? = null
+    private var audioRecordingState = AudioRecordingState.IDLE
+    private var suppressAudioRecordingDialogCancel = false
+    private var hasMultipleRecipientsForMenu = false
+    private var forceExpandedRecipientsEditor = false
+    private var currentAttachments: List<Attachment> = emptyList()
+    private val ensureComposeFocusRunnable = Runnable {
+        if (isFinishing || isDestroyed) return@Runnable
+
+        val focused = currentFocus
+        if (focused != null && isDescendantOf(contentView, focused)) {
+            return@Runnable
+        }
+
+        if (restoreLastFocusedMessageIfVisibleIfAvailable()) {
+            return@Runnable
+        }
+
+        when {
+            message.isShown && message.isFocusable -> message.requestFocus()
+            sendTv.isShown && sendTv.isFocusable -> sendTv.requestFocus()
+            attachTv.isShown && attachTv.isFocusable -> attachTv.requestFocus()
+            else -> contentView.requestFocus()
+        }
+    }
+    private val forceComposeInteractionFocusRunnable = Runnable {
+        if (isFinishing || isDestroyed) return@Runnable
+
+        if (restoreLastFocusedMessageIfVisibleIfAvailable()) {
+            return@Runnable
+        }
+
+        when {
+            message.isShown && message.isFocusable -> {
+                if (!message.isFocused) {
+                    message.requestFocus()
+                }
+                message.setSelection(message.text?.length ?: 0)
+            }
+            sendTv.isShown && sendTv.isFocusable -> sendTv.requestFocus()
+            attachTv.isShown && attachTv.isFocusable -> attachTv.requestFocus()
+            else -> contentView.requestFocus()
+        }
+    }
 
     private val sVideoDuration = intArrayOf(0, 5, 10, 15, 20, 30, 40, 50, 60, 90, 120)
 
     private var datePickerDialog: DatePickerDialog? = null
     private var timePickerDialog: TimePickerDialog? = null
+    private lateinit var binding: ComposeActivityBinding
+    private var composeSearchMode = false
+    private var draftBeforeSearch = ""
+    private var lastRecipientSummaryLog = ""
 
+    private fun triggerSend(source: String): Boolean {
+        Log.d(
+            "QK-COMPOSE",
+            "sendTrigger source=$source enabled=${sendTv.isEnabled} textBlank=${message.text.isNullOrBlank()}"
+        )
+        pendingFocusNewestSentMessage = true
+        sendTv.performClick()
+        return true
+    }
+
+    private val contentView get() = binding.contentView
+    private val messageList get() = binding.messageList
+    private val messagesEmpty get() = binding.messagesEmpty
+    private val loading get() = binding.loading
+    private val sendAsGroup get() = binding.sendAsGroup
+    private val sendAsGroupBackground get() = binding.sendAsGroupBackground
+    private val sendAsGroupSwitch get() = binding.sendAsGroupSwitch
+    private val composeBar get() = binding.composeBar
+    private val messageBackground get() = binding.messageBackground
+    private val scheduledGroup get() = binding.scheduledGroup
+    private val scheduledTime get() = binding.scheduledTime
+    private val scheduledCancel get() = binding.scheduledCancel
+    private val attachments get() = binding.attachments
+    private val message get() = binding.message
+    private val searchCounter get() = binding.searchCounter
+    private val sim get() = binding.sim
+    private val simIndex get() = binding.simIndex
+    private val counter get() = binding.counter
+    private val send get() = binding.send
+    private val toolbar get() = binding.toolbar
+    private val toolbarTitle get() = binding.toolbarTitle
+    private val toolbarSubtitle get() = binding.toolbarSubtitle
+    private val recipientSummary get() = binding.recipientSummary
+    private val chips get() = binding.chips
+    private val headerAddRecipient get() = binding.headerAddRecipient
+    private val headerViewRecipients get() = binding.headerViewRecipients
+    private val attachingBackground get() = binding.attachingBackground
+    private val contact get() = binding.contact
+    private val contactLabel get() = binding.contactLabel
+    private val schedule get() = binding.schedule
+    private val scheduleLabel get() = binding.scheduleLabel
+    private val gallery get() = binding.gallery
+    private val galleryLabel get() = binding.galleryLabel
+    private val camera get() = binding.camera
+    private val cameraLabel get() = binding.cameraLabel
+    private val attach get() = binding.attach
+    private val attachTv get() = binding.attachTv
+    private val sendTv get() = binding.sendTv
+    private val moreTv get() = binding.moreTv
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.compose_activity)
+        binding = ComposeActivityBinding.inflate(layoutInflater)
+        setContentView(binding.root)
         showBackButton(true)
         viewModel.bindView(this)
 
+        toolbarTitle.isFocusable = true
+        toolbarTitle.isFocusableInTouchMode = true
+
         initClicks()
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
-
-
 
         contentView.layoutTransition = LayoutTransition().apply {
             disableTransitionType(LayoutTransition.CHANGING)
@@ -199,33 +337,76 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         messageAdapter.autoScrollToStart(messageList) //not
         messageAdapter.emptyView = messagesEmpty
 
-        messageList.setLastItemVisibleListener {
-            // Last item is visible
-            // Do something here
-            messageAdapter.data?.second?.let {
-//                messageList.scrollToPosition(it.size - 1)
-//                messageAdapter.notifyDataSetChanged()
-            }
-        }
-
-        messageList.setLastItemFocusedListener {
-            // Last item has focus
-            // Do something here
-            makeToast("called")
-            messageAdapter.data?.second?.let {
-                messageList.scrollToPosition(it.size - 1)
-                messageAdapter.notifyDataSetChanged()
-                makeToast("focused ${it.size - 1}")
-            }
-        }
-
-
-
-        messageList.setHasFixedSize(true) //not
+        currentThreadId = intent.getLongExtra("threadId", 0L)
         messageList.adapter = messageAdapter
+        messageList.isFocusable = true
+        messageList.isFocusableInTouchMode = true
+        messageList.itemAnimator = null
+        messageList.setHasFixedSize(true)
+        messageList.setItemViewCacheSize(4)
+        (messageList.layoutManager as? LinearLayoutManager)?.isItemPrefetchEnabled = false
         attachments.adapter = attachmentAdapter
+        attachments.setHasFixedSize(true)
+
+        messageAdapter.clicks
+            .autoDisposable(scope())
+            .subscribe { messageId ->
+                if (rememberMessageByIdForRestore(messageId)) {
+                    pendingRestoreMessageFocusOnResume = true
+                }
+                messageClickIntent.onNext(messageId)
+            }
+
+        messageAdapter.partClicks
+            .autoDisposable(scope())
+            .subscribe { partId ->
+                if (rememberMessageForPartRestore(partId)) {
+                    pendingRestoreMessageFocusOnResume = true
+                }
+                messagePartClickIntent.onNext(partId)
+            }
+
+        messageAdapter.selectionChanges
+            .autoDisposable(scope())
+            .subscribe { selection ->
+                selectedMessageCount = selection.size
+                if (selection.isNotEmpty() && !optionsDialogShownForSelection) {
+                    messageOptionsSelectionIntent.onNext(selection.toList())
+                    showOptionsDialog(isMMS)
+                }
+            }
+
+        optionsItemIntent
+            .autoDisposable(scope())
+            .subscribe { itemId ->
+                if (itemId == R.id.info || itemId == R.id.call || itemId == R.id.schedule_message) {
+                    pendingForceComposeFocusOnResume = true
+                }
+            }
 
         message.supportsInputContent = true
+        message.setOnFocusChangeListener { _, hasFocus ->
+            val minLines = if (hasFocus) getVisibleComposeInputLines() else 1
+            if (message.minLines != minLines) {
+                message.minLines = minLines
+            }
+        }
+        message.textChanges()
+            .autoDisposable(scope())
+            .subscribe {
+                if (message.isFocused) {
+                    val neededLines = getVisibleComposeInputLines()
+                    if (message.minLines != neededLines) {
+                        message.minLines = neededLines
+                    }
+                }
+            }
+        message.textChanges()
+            .filter { composeSearchMode }
+            .map { it.toString() }
+            .distinctUntilChanged()
+            .autoDisposable(scope())
+            .subscribe(searchQueryIntent::onNext)
 
         theme.doOnNext { loading.setTint(it.theme) }.doOnNext { attach.setBackgroundTint(it.theme) }
             .doOnNext { attach.setTint(it.textPrimary) }.doOnNext { messageAdapter.theme = it }
@@ -235,8 +416,36 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
         // These theme attributes don't apply themselves on API 21
         if (Build.VERSION.SDK_INT <= 22) {
-            messageBackground.setBackgroundTint(resolveThemeColor(R.attr.bubbleColor))
+            messageBackground.setBackgroundTint(resources.getColor(R.color.threadSurface))
         }
+
+        contentView.post {
+            if (isFinishing || isDestroyed) return@post
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                activityVisibleIntent.onNext(true)
+            }
+        }
+    }
+
+    private fun getVisibleComposeInputLines(): Int {
+        // Keep one spare visible line because the TCL typing add-on covers the last input line.
+        return (message.lineCount + 1).coerceAtLeast(2)
+    }
+
+    private fun updateComposeBackgroundTopAnchor(scheduledVisible: Boolean, attachmentsVisible: Boolean) {
+        val target = when {
+            scheduledVisible -> R.id.scheduledCancel
+            attachmentsVisible -> R.id.attachments
+            else -> R.id.message
+        }
+        val params = messageBackground.layoutParams as? ConstraintLayout.LayoutParams ?: return
+        if (params.topToTop == target && params.topToBottom == ConstraintLayout.LayoutParams.UNSET) {
+            return
+        }
+
+        params.topToTop = target
+        params.topToBottom = ConstraintLayout.LayoutParams.UNSET
+        messageBackground.layoutParams = params
     }
 
     override fun onStart() {
@@ -246,6 +455,18 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     override fun onPause() {
         super.onPause()
+        Timber.d(
+            "ComposeActivity onPause threadId=%s focus=%s selectedMessages=%s searchMode=%s",
+            currentThreadId,
+            currentFocus?.javaClass?.simpleName ?: "null",
+            selectedMessageCount,
+            composeSearchMode
+        )
+        if (rememberFocusedMessageForRestore()) {
+            pendingRestoreMessageFocusOnResume = true
+        }
+        compactMenuDialog?.dismiss()
+        compactMenuDialog = null
         activityVisibleIntent.onNext(false)
     }
 
@@ -255,7 +476,12 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             return
         }
 
-        threadId.onNext(state.threadId)
+        if (currentThreadId != state.threadId) {
+            currentThreadId = state.threadId
+            threadId.onNext(state.threadId)
+        } else {
+            currentThreadId = state.threadId
+        }
 
         // Old code for message selection changes
 //        title = when {
@@ -266,105 +492,257 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 //            else -> state.conversationtitle
 //        }
 
+        if (state.selectedMessages == 0) {
+            optionsDialogShownForSelection = false
+        }
+
+        if (!state.editingMode) {
+            forceExpandedRecipientsEditor = false
+        }
 
         title = when {
             state.selectedMessages > 0 -> {
-
-                if (!(lastPasteClickedTime != null && (Date().time - lastPasteClickedTime!!.time) < 15000)) {
-
-
-                    showOptionsDialog(state.isMMS)
-                } else {
+                if (lastPasteClickedTime != null && (Date().time - lastPasteClickedTime!!.time) >= 15000) {
                     lastPasteClickedTime = null
                 }
-
                 state.conversationtitle
             }
-
             state.query.isNotEmpty() -> state.query
             else -> state.conversationtitle
         }
 
+        val searchActive = state.query.isNotEmpty()
+        val searchPosition = state.searchSelectionPosition.coerceAtLeast(0)
+        val searchTotal = state.searchResults.coerceAtLeast(0)
+        val searchCounterText = "<$searchPosition/$searchTotal>"
+        if (toolbarSubtitle.isVisible) {
+            toolbarSubtitle.setVisible(false)
+        }
+        if (searchCounter.isVisible != composeSearchMode) {
+            searchCounter.setVisible(composeSearchMode)
+        }
+        if (composeSearchMode && searchCounter.text?.toString() != searchCounterText) {
+            searchCounter.text = searchCounterText
+        }
 
+        hasMultipleRecipientsForMenu = when {
+            state.editingMode -> state.selectedChips.size > 1
+            else -> (state.messages?.first?.recipients?.count { it.isValid } ?: 0) > 1
+        }
+        val messageCount = state.messages?.second?.size ?: 0
+        val canEditRecipients = state.editingMode || messageCount == 0
 
-
-        toolbarSubtitle.setVisible(state.query.isNotEmpty())
-        toolbarSubtitle.text = getString(
-            R.string.compose_subtitle_results, state.searchSelectionPosition, state.searchResults
-        )
-
-        toolbarTitle.setVisible(!state.editingMode)
-        chips.setVisible(state.editingMode)
-        composeBar.setVisible(!state.loading)
+        val toolbarTitleText = when {
+            state.editingMode && state.selectedChips.size > 1 ->
+                "${state.selectedChips.size} recipients"
+            state.editingMode && state.selectedChips.size == 1 ->
+                state.selectedChips.first().getDisplayName()
+            else -> title?.toString().orEmpty()
+        }
+        if (toolbarTitle.text?.toString() != toolbarTitleText) {
+            toolbarTitle.text = toolbarTitleText
+        }
+        if (!toolbarTitle.isVisible) {
+            toolbarTitle.setVisible(true)
+        }
+        val recipientSummaryText = when {
+            state.editingMode && state.selectedChips.size > 1 ->
+                "To: ${state.selectedChips.joinToString(", ") { it.getDisplayName() }}"
+            else -> ""
+        }
+        val recipientSummaryLog =
+            "editing=${state.editingMode} chips=${state.selectedChips.map { it.address }} summary=$recipientSummaryText"
+        if (lastRecipientSummaryLog != recipientSummaryLog) {
+            lastRecipientSummaryLog = recipientSummaryLog
+            Log.d("QK-COMPOSE", "renderRecipients $recipientSummaryLog")
+        }
+        if (recipientSummary.text?.toString() != recipientSummaryText) {
+            recipientSummary.text = recipientSummaryText
+        }
+        if (recipientSummary.isVisible != recipientSummaryText.isNotEmpty()) {
+            recipientSummary.setVisible(recipientSummaryText.isNotEmpty())
+        }
+        val chipsVisible = false
+        if (chips.isVisible) {
+            chips.setVisible(false)
+        }
+        val showHeaderActions = state.selectedMessages == 0 && !chipsVisible
+        val showAddRecipient = showHeaderActions && canEditRecipients
+        if (headerAddRecipient.isVisible != showAddRecipient) {
+            headerAddRecipient.isVisible = showAddRecipient
+        }
+        val showViewRecipients = showHeaderActions && hasMultipleRecipientsForMenu
+        if (headerViewRecipients.isVisible != showViewRecipients) {
+            headerViewRecipients.isVisible = showViewRecipients
+        }
+        if (composeBar.isVisible == state.loading) {
+            composeBar.setVisible(!state.loading)
+        }
 
         // Don't set the adapters unless needed
         if (state.editingMode && chips.adapter == null) chips.adapter = chipsAdapter
 
-        toolbar.menu.findItem(R.id.add)?.isVisible = state.editingMode
+        toolbar.menu.findItem(R.id.add)?.let { item ->
+            if (item.isVisible != canEditRecipients) {
+                item.isVisible = canEditRecipients
+            }
+        }
+        listOf(R.id.previous, R.id.next, R.id.clear).forEach { id ->
+            toolbar.menu.findItem(id)?.let { item ->
+                if (item.isVisible != searchActive) {
+                    item.isVisible = searchActive
+                }
+            }
+        }
 
-
-        // call menu is always visible
-        toolbar.menu.findItem(R.id.call)?.isVisible = false //manyhill
-
-        // uncomment code to visible call menu only when message selected
-//        toolbar.menu.findItem(R.id.call)?.isVisible =
-//            !state.editingMode && state.selectedMessages == 0 && state.query.isEmpty()
-
-        toolbar.menu.findItem(R.id.info)?.isVisible = false
-        //manyhill  !state.editingMode && state.selectedMessages == 0 && state.query.isEmpty()
-        toolbar.menu.findItem(R.id.copy)?.isVisible =
-            !state.editingMode && state.selectedMessages > 0
+        toolbar.menu.findItem(R.id.copy)?.let { item ->
+            val copyVisible = !state.editingMode && state.selectedMessages > 0
+            if (item.isVisible != copyVisible) {
+                item.isVisible = copyVisible
+            }
+        }
 
         // uncomment the code to see details menu
 //        toolbar.menu.findItem(R.id.details)?.isVisible =
 //            !state.editingMode && state.selectedMessages == 1
 
+        if (chipsAdapter.data !== state.selectedChips && chipsAdapter.data != state.selectedChips) {
+            chipsAdapter.data = state.selectedChips
+        }
 
-        toolbar.menu.findItem(R.id.delete)?.isVisible = false //manyhill all false
-        // !state.editingMode && state.selectedMessages > 0
-        toolbar.menu.findItem(R.id.forward)?.isVisible = false
-        //   !state.editingMode && state.selectedMessages == 1
-        toolbar.menu.findItem(R.id.previous)?.isVisible = false
-        //  state.selectedMessages == 0 && state.query.isNotEmpty()
-        toolbar.menu.findItem(R.id.next)?.isVisible = false
-        //  state.selectedMessages == 0 && state.query.isNotEmpty()
-        toolbar.menu.findItem(R.id.clear)?.isVisible = false
-        // state.selectedMessages == 0 && state.query.isNotEmpty()
+        if (loading.isVisible != state.loading) {
+            loading.setVisible(state.loading)
+        }
 
-        chipsAdapter.data = state.selectedChips
+        val sendAsGroupVisible = state.editingMode && state.selectedChips.size >= 2
+        if (sendAsGroup.isVisible != sendAsGroupVisible) {
+            sendAsGroup.setVisible(sendAsGroupVisible)
+        }
+        if (sendAsGroupSwitch.isChecked != state.sendAsGroup) {
+            sendAsGroupSwitch.isChecked = state.sendAsGroup
+        }
 
-        loading.setVisible(state.loading)
+        val messageListVisible = !state.editingMode || state.sendAsGroup || state.selectedChips.size == 1
+        if (messageList.isVisible != messageListVisible) {
+            messageList.setVisible(messageListVisible)
+        }
 
-        sendAsGroup.setVisible(state.editingMode && state.selectedChips.size >= 2)
-        sendAsGroupSwitch.isChecked = state.sendAsGroup
+        val latestMessage = state.messages?.second?.lastOrNull()
+        val latestMessageId = latestMessage?.id
+        val latestMessageChanged = latestMessageId != lastRenderedLatestMessageId
+        val shouldPositionInitialMessages =
+            latestMessage != null && initialMessageLayoutThreadId != state.threadId
 
-        messageList.setVisible(!state.editingMode || state.sendAsGroup || state.selectedChips.size == 1)
-        messageAdapter.data = state.messages
+        // Updated: feed data through the adapter's API
+        messageAdapter.threadData = state.messages
         messageAdapter.highlight = state.searchSelectionId
+        messageAdapter.searchQuery = state.query
 
-        isMMS=state.isMMS
+        if (latestMessageChanged) {
+            lastRenderedLatestMessageId = latestMessageId
+        }
 
-        scheduledGroup.isVisible = state.scheduled != 0L
-        scheduledTime.text = dateFormatter.getScheduledTimestamp(state.scheduled)
+        if (shouldPositionInitialMessages) {
+            initialMessageLayoutThreadId = state.threadId
+            scrollLatestMessageIntoView()
+            messageList.postDelayed({ scrollLatestMessageIntoView() }, 150)
+        }
 
-        attachments.setVisible(state.attachments.isNotEmpty())
-        attachmentAdapter.data = state.attachments
+        if (pendingFocusNewestSentMessage && latestMessageChanged) {
+            if (latestMessage != null && latestMessage.isMe()) {
+                pendingFocusNewestSentMessage = false
+                lastFocusedMessageId = latestMessage.id
+                Log.d("QK-COMPOSE", "scrollLatestSentMessage id=${latestMessage.id} sending=${latestMessage.isSending()}")
+                scrollLatestMessageIntoView()
+                messageList.postDelayed({ scrollLatestMessageIntoView() }, 150)
+            }
+        }
 
-        attach.animate().rotation(if (state.attaching) 135f else 0f).start()
+        isMMS = state.isMMS
+
+        val scheduledVisible = state.scheduled != 0L
+        if (scheduledGroup.isVisible != scheduledVisible) {
+            scheduledGroup.isVisible = scheduledVisible
+        }
+        val scheduledTimestamp = dateFormatter.getScheduledTimestamp(state.scheduled)
+        if (scheduledTime.text?.toString() != scheduledTimestamp) {
+            scheduledTime.text = scheduledTimestamp
+        }
+
+        val attachmentsVisible = state.attachments.isNotEmpty()
+        if (attachments.isVisible != attachmentsVisible) {
+            attachments.setVisible(attachmentsVisible)
+        }
+        currentAttachments = state.attachments
+        updateSoftKeyLabels(attachmentsVisible)
+        updateComposeBackgroundTopAnchor(scheduledVisible, attachmentsVisible)
+        if (attachmentAdapter.data !== state.attachments && attachmentAdapter.data != state.attachments) {
+            attachmentAdapter.data = state.attachments
+        }
+
+        if (lastAttachingState != state.attaching) {
+            lastAttachingState = state.attaching
+            attach.animate().rotation(if (state.attaching) 135f else 0f).start()
+        }
 
         // Old Attaching options UI always gone
 //        attaching.isVisible = state.attaching
 
-        counter.text = state.remaining
-        counter.setVisible(counter.text.isNotBlank())
+        if (counter.text?.toString() != state.remaining) {
+            counter.text = state.remaining
+        }
+        val counterVisible = state.remaining.isNotBlank()
+        if (counter.isVisible != counterVisible) {
+            counter.setVisible(counterVisible)
+        }
 
-        sim.setVisible(state.subscription != null)
-        sim.contentDescription = getString(R.string.compose_sim_cd, state.subscription?.displayName)
-        simIndex.text = state.subscription?.simSlotIndex?.plus(1)?.toString()
+        val simVisible = state.subscription != null
+        if (sim.isVisible != simVisible) {
+            sim.setVisible(simVisible)
+        }
+        val simDescription = getString(R.string.compose_sim_cd, state.subscription?.displayName)
+        if (sim.contentDescription?.toString() != simDescription) {
+            sim.contentDescription = simDescription
+        }
+        val simIndexText = state.subscription?.simSlotIndex?.plus(1)?.toString()
+        if (simIndex.text?.toString() != simIndexText) {
+            simIndex.text = simIndexText
+        }
 
 //        send.isEnabled = state.canSend
 //        send.imageAlpha = if (state.canSend) 255 else 128
-        send_tv.isEnabled = state.canSend
+        if (!sendTv.isEnabled) {
+            sendTv.isEnabled = true
+        }
+        val sendAlpha = if (state.canSend || !message.text.isNullOrBlank()) 1f else 0.5f
+        if (sendTv.alpha != sendAlpha) {
+            sendTv.alpha = sendAlpha
+        }
+    }
+
+    private fun updateSoftKeyLabels(hasAttachments: Boolean) {
+        val rightPadding = (16 * resources.displayMetrics.density).toInt()
+        if (hasAttachments) {
+            if (!moreTv.isVisible) {
+                moreTv.isVisible = true
+            }
+            if (sendTv.gravity != Gravity.CENTER) {
+                sendTv.gravity = Gravity.CENTER
+            }
+            if (sendTv.paddingEnd != 0) {
+                sendTv.setPadding(sendTv.paddingLeft, sendTv.paddingTop, 0, sendTv.paddingBottom)
+            }
+        } else {
+            if (moreTv.isVisible) {
+                moreTv.isVisible = false
+            }
+            if (sendTv.gravity != Gravity.END) {
+                sendTv.gravity = Gravity.END
+            }
+            if (sendTv.paddingEnd != rightPadding) {
+                sendTv.setPadding(sendTv.paddingLeft, sendTv.paddingTop, rightPadding, sendTv.paddingBottom)
+            }
+        }
     }
 
     override fun clearSelection() = messageAdapter.clearSelection()
@@ -392,6 +770,14 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         )
     }
 
+    private fun requestAudioPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            RecordAudioPermissionRequestCode
+        )
+    }
+
     override fun requestDatePicker() {
 
         startActivityForResult(
@@ -410,14 +796,24 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         startActivityForResult(Intent.createChooser(intent, null), AttachContactRequestCode)
     }
 
-    override fun showContacts(sharing: Boolean, chips: List<Recipient>) {
+    override fun showContacts(sharing: Boolean, chips: List<Recipient>, singleRecipient: Boolean) {
         message.hideKeyboard()
         val serialized =
             HashMap(chips.associate { chip -> chip.address to chip.contact?.lookupKey })
+        val forwardMode = intent.extras?.getBoolean("forward_mode", false) ?: false
+        Log.d(
+            "QK-COMPOSE",
+            "showContacts sharing=$sharing forwardMode=$forwardMode singleRecipient=$singleRecipient chips=${serialized.keys}"
+        )
         val intent = Intent(this, ContactsActivity::class.java).putExtra(
-            ContactsActivity.SharingKey, sharing
+            ContactsActivity.SharingKey, sharing && !forwardMode
         ).putExtra(ContactsActivity.ChipsKey, serialized)
+            .putExtra(ContactsActivity.SingleRecipientKey, forwardMode || singleRecipient)
         startActivityForResult(intent, SelectContactRequestCode)
+    }
+
+    override fun showSelectedRecipients(chips: List<Recipient>) {
+        Log.d("QK-COMPOSE", "showSelectedRecipients ignored chips=${chips.map { it.address }}")
     }
 
     override fun themeChanged() {
@@ -465,12 +861,13 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     }
 
     override fun recordAudio() {
-        val intent = Intent("android.intent.action.GET_CONTENT")
-        intent.type = "audio/amr"
-        intent.setClassName("com.android.soundrecorder", "com.android.soundrecorder.SoundRecorder")
-        intent.putExtra("android.provider.MediaStore.extra.MAX_BYTES", 600000)
-        intent.putExtra("exit_after_record", true)
-        startActivityForResult(Intent.createChooser(intent, null), RecordAudioRequestCode)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingAudioRecording = true
+            requestAudioPermission()
+            return
+        }
+
+        showInAppAudioRecordingDialog()
     }
 
     override fun recordVideo() {
@@ -533,9 +930,9 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
             .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             .putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).type ="vnd.android.cursor.dir/video"
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).type = "vnd.android.cursor.dir/video"
 
-                    startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
+        startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
     }
 
     override fun setDraft(draft: String) {
@@ -543,9 +940,26 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         message.setSelection(draft.length)
     }
 
+    override fun getDraft(): CharSequence = message.text ?: ""
+
+    private fun appendDraftText(text: CharSequence) {
+        val insert = text.toString()
+        if (insert.isEmpty()) return
+
+        val start = message.selectionStart.takeIf { it >= 0 } ?: message.text?.length ?: 0
+        val end = message.selectionEnd.takeIf { it >= 0 } ?: start
+        val rangeStart = minOf(start, end)
+        val rangeEnd = maxOf(start, end)
+        message.text?.replace(rangeStart, rangeEnd, insert)
+        val cursor = rangeStart + insert.length
+        message.setSelection(cursor.coerceAtMost(message.text?.length ?: cursor))
+    }
+
     override fun scrollToMessage(id: Long) {
-        messageAdapter.data?.second?.indexOfLast { message -> message.id == id }
-            ?.takeIf { position -> position != -1 }?.let(messageList::scrollToPosition) //not
+        messageAdapter.data
+            ?.indexOfLast { message -> message.id == id }
+            ?.takeIf { position -> position != -1 }
+            ?.let { position -> messageList.scrollToPosition(position) } //not
     }
 
     override fun showQksmsPlusSnackbar(message: Int) {
@@ -558,7 +972,48 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         menuInflater.inflate(R.menu.compose, menu)
+        menu?.findItem(R.id.call)?.isVisible = false
+        menu?.findItem(R.id.info)?.isVisible = false
+        menu?.findItem(R.id.delete)?.isVisible = false
+        menu?.findItem(R.id.forward)?.isVisible = false
+        menu?.findItem(R.id.previous)?.isVisible = false
+        menu?.findItem(R.id.next)?.isVisible = false
+        menu?.findItem(R.id.clear)?.isVisible = false
         return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Timber.d(
+            "ComposeActivity onResume threadId=%s focus=%s pendingForce=%s pendingRestore=%s hasWindowFocus=%s",
+            currentThreadId,
+            currentFocus?.javaClass?.simpleName ?: "null",
+            pendingForceComposeFocusOnResume,
+            pendingRestoreMessageFocusOnResume,
+            hasWindowFocus()
+        )
+        if (pendingForceComposeFocusOnResume) {
+            pendingForceComposeFocusOnResume = false
+            forceComposeInteractionFocus()
+            return
+        }
+        if (pendingRestoreMessageFocusOnResume) {
+            pendingRestoreMessageFocusOnResume = false
+            restoreLastFocusedMessageIfVisible()
+        }
+        ensureComposeFocus()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        Timber.d(
+            "ComposeActivity onWindowFocusChanged hasFocus=%s focus=%s",
+            hasFocus,
+            currentFocus?.javaClass?.simpleName ?: "null"
+        )
+        if (hasFocus) {
+            ensureComposeFocus()
+        }
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -573,10 +1028,17 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         when {
-            requestCode == SelectContactRequestCode -> {
-                chipsSelectedIntent.onNext(data?.getSerializableExtra(ContactsActivity.ChipsKey)
+            requestCode == SelectContactRequestCode && resultCode == Activity.RESULT_OK -> {
+                val chips = data?.getSerializableExtra(ContactsActivity.ChipsKey)
                     ?.let { serializable -> serializable as? HashMap<String, String?> }
-                    ?: hashMapOf())
+                    ?: hashMapOf()
+                Log.d("QK-COMPOSE", "contactsResult chips=${chips.keys}")
+                chipsSelectedIntent.onNext(chips)
+            }
+
+            requestCode == SelectContactRequestCode && chipsAdapter.data.isNullOrEmpty() -> {
+                Log.d("QK-COMPOSE", "contactsResult cancelled emptyChips=true")
+                chipsSelectedIntent.onNext(hashMapOf())
             }
 
             requestCode == TakePhotoRequestCode && resultCode == Activity.RESULT_OK -> {
@@ -634,7 +1096,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 }
             }
 
-
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
     }
@@ -649,29 +1110,136 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         super.onRestoreInstanceState(savedInstanceState)
     }
 
-    override fun onBackPressed() = backPressedIntent.onNext(Unit)
+    override fun onBackPressed() {
+        Timber.d(
+            "ComposeActivity onBackPressed focus=%s selectedMessages=%s searchMode=%s",
+            currentFocus?.javaClass?.simpleName ?: "null",
+            selectedMessageCount,
+            composeSearchMode
+        )
+        if (composeSearchMode) {
+            exitComposeSearchMode()
+        } else if (selectedMessageCount > 0) {
+            clearSelection()
+            restoreLastFocusedMessageIfVisible()
+        } else {
+            backPressedIntent.onNext(Unit)
+            if (!isFinishing && !isDestroyed) {
+                finish()
+            }
+        }
+    }
 
+    fun handleWindowBackKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
+
+        Timber.d(
+            "ComposeActivity handleWindowBackKeyEvent action=%s repeat=%s focus=%s",
+            event.action,
+            event.repeatCount,
+            currentFocus?.javaClass?.simpleName ?: "null"
+        )
+
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> true
+            KeyEvent.ACTION_UP -> {
+                onBackPressed()
+                true
+            }
+            else -> false
+        }
+    }
+
+    override fun onDestroy() {
+        contentView.removeCallbacks(ensureComposeFocusRunnable)
+        contentView.removeCallbacks(forceComposeInteractionFocusRunnable)
+        audioRecordingDialog?.dismiss()
+        audioRecordingDialog = null
+        discardInAppAudioRecording()
+        super.onDestroy()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == RecordAudioPermissionRequestCode) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (granted && pendingAudioRecording) {
+                pendingAudioRecording = false
+                showInAppAudioRecordingDialog()
+            } else {
+                pendingAudioRecording = false
+                Toast.makeText(this, R.string.compose_audio_permission_denied, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-
+        if (keyCode == KeyEvent.KEYCODE_BACK || event?.keyCode == KeyEvent.KEYCODE_BACK) {
+            Timber.d(
+                "ComposeActivity onKeyUp BACK repeat=%s focus=%s",
+                event?.repeatCount ?: 0,
+                currentFocus?.javaClass?.simpleName ?: "null"
+            )
+        }
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            onBackPressed()
+            return true
+        }
 
         return when (event?.keyCode) {
             KeyEvent.KEYCODE_SOFT_LEFT -> {
-                attach_tv.performClick()
+                attachTv.performClick()
                 true
             }
 
             KeyEvent.KEYCODE_SOFT_RIGHT -> {
-                if (send_tv.isEnabled)
-                    send_tv.performClick()
-                true
+                if (moreTv.isShown) {
+                    moreTv.performClick()
+                    true
+                } else {
+                    triggerSend("softRight")
+                }
             }
 
             KeyEvent.KEYCODE_DPAD_CENTER -> {
-                if (message.isFocused && send_tv.isEnabled) {
-                    send_tv.performClick()
+                if (message.isFocused) {
+                    triggerSend("dpadCenterMessage")
+                } else {
+                    val focusedMessage = findFocusedMessage()
+                    focusedMessage?.let { message -> lastFocusedMessageId = message.id }
+                    if (focusedMessage != null &&
+                        focusedMessage.isSending() &&
+                        focusedMessage.date > System.currentTimeMillis()
+                    ) {
+                        messageAdapter.cancelSending.onNext(focusedMessage.id)
+                        true
+                    } else {
+                        if (focusedMessage != null) {
+                            pendingRestoreMessageFocusOnResume = true
+                        }
+                        super.onKeyUp(keyCode, event)
+                    }
+                }
+            }
+
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                val focusedMessage = findFocusedMessage()
+                focusedMessage?.let { message -> lastFocusedMessageId = message.id }
+                if (focusedMessage != null &&
+                    focusedMessage.isSending() &&
+                    focusedMessage.date > System.currentTimeMillis()
+                ) {
+                    messageAdapter.cancelSending.onNext(focusedMessage.id)
                     true
                 } else {
+                    if (focusedMessage != null) {
+                        pendingRestoreMessageFocusOnResume = true
+                    }
                     super.onKeyUp(keyCode, event)
                 }
             }
@@ -680,132 +1248,854 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         }
     }
 
-
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        return if (messageList.isFocused || (currentFocus?.parent as? ViewGroup?)?.id == R.id.messageList) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (messageList.canScrollVertically(1)) {
-                        (messageList.layoutManager as LinearLayoutManager).let {
-                            val last = it.findLastVisibleItemPosition()
-                            val first = it.findFirstVisibleItemPosition()
-                            if (first != RecyclerView.NO_POSITION && last != RecyclerView.NO_POSITION && last - first > 0) {
-                                super.onKeyDown(keyCode, event)
-                            } else {
-                                messageList.smoothScrollBy(0, messageList.height - 16)
-                                true
-                            }
-                        }
-                    } else {
-                        super.onKeyDown(keyCode, event)
-                    }
-                }
-
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    if (messageList.canScrollVertically(-1)) {
-                        (messageList.layoutManager as LinearLayoutManager).let {
-                            val last = it.findLastVisibleItemPosition()
-                            val first = it.findFirstVisibleItemPosition()
-                            if (first != RecyclerView.NO_POSITION && last != RecyclerView.NO_POSITION && last - first > 0) {
-                                super.onKeyDown(keyCode, event)
-                            } else {
-                                messageList.smoothScrollBy(0, 16 - messageList.height)
-                                true
-                            }
-                        }
-                    } else {
-                        super.onKeyDown(keyCode, event)
-                    }
-                }
-
-                else -> super.onKeyDown(keyCode, event)
-            }
-        } else {
-            super.onKeyDown(keyCode, event)
+        if (keyCode == KeyEvent.KEYCODE_BACK || event?.keyCode == KeyEvent.KEYCODE_BACK) {
+            Timber.d(
+                "ComposeActivity onKeyDown BACK repeat=%s focus=%s",
+                event?.repeatCount ?: 0,
+                currentFocus?.javaClass?.simpleName ?: "null"
+            )
         }
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            return true
+        }
+
+        if (composeSearchMode) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    optionsItemIntent.onNext(R.id.previous)
+                    return true
+                }
+
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    optionsItemIntent.onNext(R.id.next)
+                    return true
+                }
+
+                else -> Unit
+            }
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP && (message.isFocused || sendTv.isFocused)) {
+            if (sendAsGroup.isVisible && sendAsGroupBackground.isShown) {
+                focusHeaderAction()
+                return true
+            }
+            focusLatestMessageAtBottom()
+            return true
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP && sendAsGroupBackground.isFocused) {
+            if (focusToolbarAction()) {
+                return true
+            }
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
+            (headerAddRecipient.isFocused || headerViewRecipients.isFocused) &&
+            sendAsGroup.isVisible && sendAsGroupBackground.isShown) {
+            sendAsGroupBackground.requestFocus()
+            return true
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && toolbarTitle.isFocused) {
+            if (focusFirstVisibleMessageAtTop()) {
+                return true
+            }
+        }
+
+         fun getItemRectInRecycler(itemView: View): Rect {
+            val rect = Rect()
+            if (!isDescendantOf(messageList, itemView)) return rect
+            itemView.getDrawingRect(rect)
+            messageList.offsetDescendantRectToMyCoords(itemView, rect)
+            return rect
+        }
+
+
+
+        val itemView = findMessageItemView(currentFocus) ?: return super.onKeyDown(keyCode, event)
+
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                val rect = getItemRectInRecycler(itemView)
+                val visibleBottom = messageList.height - messageList.paddingBottom
+
+                if (rect.bottom > visibleBottom) {
+                    val visibleHeight = messageList.height - messageList.paddingTop - messageList.paddingBottom
+                    val pageStep = visibleHeight
+                    val hiddenBottom = rect.bottom - visibleBottom
+                    val extraLineAdvance = itemView.findViewById<TextView?>(R.id.body)?.lineHeight ?: 0
+                    val delta = minOf(pageStep, hiddenBottom + extraLineAdvance)
+                    messageList.scrollBy(0, delta)
+                    itemView.requestFocus()
+                    return true
+                }
+
+                val rawNext = itemView.focusSearch(View.FOCUS_DOWN)
+                val next = findMessageItemView(rawNext)
+
+                if (next != null && next !== itemView && isDescendantOf(messageList, next)) {
+                    alignItemBottom(next)
+                    return true
+                }
+
+                lastFocusedMessageId = messageList.findContainingViewHolder(itemView)
+                    ?.adapterPosition
+                    ?.takeIf { it != RecyclerView.NO_POSITION }
+                    ?.let(messageAdapter::getItem)
+                    ?.id
+
+                message.post {
+                    if (!message.isFocused) {
+                        message.requestFocus()
+                    }
+                    message.setSelection(message.text?.length ?: 0)
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                val rect = getItemRectInRecycler(itemView)
+                val visibleTop = messageList.paddingTop
+
+                // Still more of the current message hidden above: reveal it first
+                if (rect.top < visibleTop) {
+                    val pageStep = ((messageList.height - messageList.paddingTop - messageList.paddingBottom) * 0.85f).toInt()
+                    val hiddenTop = visibleTop - rect.top
+                    val delta = minOf(pageStep, hiddenTop)
+                    messageList.scrollBy(0, -delta)
+                    itemView.requestFocus()
+                    return true
+                }else {
+                    // Current message fully shown, move to previous message
+                    val prev = findMessageItemView(itemView.focusSearch(View.FOCUS_UP))
+                    if (prev != null && prev !== itemView && isDescendantOf(messageList, prev)) {
+                        alignItemTop(prev)
+                        return true
+                    } else {
+                        if (focusHeaderAction()) {
+                            return true
+                        }
+                        return super.onKeyDown(keyCode, event)
+                    }
+                }
+            }
+
+            else -> super.onKeyDown(keyCode, event)
+        }
+    }
+    private fun focusLatestMessageAtBottom() {
+        messageList.post {
+            val lm = messageList.layoutManager as? LinearLayoutManager ?: return@post
+            val targetPosition = lastFocusedMessageId
+                ?.let { messageId ->
+                    messageAdapter.data?.indexOfLast { message -> message.id == messageId }
+                }
+                ?.takeIf { it != null && it != -1 }
+                ?: (messageAdapter.itemCount - 1)
+
+            if (targetPosition < 0) return@post
+
+            val existingTargetView = lm.findViewByPosition(targetPosition)
+            if (existingTargetView?.isFocused == true) return@post
+
+            lm.scrollToPositionWithOffset(targetPosition, messageList.height - 80)
+            messageList.post {
+                lm.findViewByPosition(targetPosition)?.let { targetView ->
+                    if (!targetView.isFocused) {
+                        targetView.requestFocus()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun scrollLatestMessageIntoView() {
+        messageList.post {
+            val lm = messageList.layoutManager as? LinearLayoutManager ?: return@post
+            val targetPosition = lastFocusedMessageId
+                ?.let { messageId ->
+                    messageAdapter.data?.indexOfLast { message -> message.id == messageId }
+                }
+                ?.takeIf { it != null && it != -1 }
+                ?: (messageAdapter.itemCount - 1)
+
+            if (targetPosition < 0) return@post
+
+            scrollToLatestMessagePosition(lm, targetPosition)
+            if (message.isShown && message.isFocusable && !message.isFocused) {
+                message.requestFocus()
+                message.setSelection(message.text?.length ?: 0)
+            }
+        }
+    }
+
+    private fun scrollToLatestMessagePosition(
+        layoutManager: LinearLayoutManager,
+        targetPosition: Int
+    ) {
+        val lastVisiblePosition = layoutManager.findLastVisibleItemPosition()
+            .takeIf { it != RecyclerView.NO_POSITION }
+        val distanceToLatest = lastVisiblePosition
+            ?.let { targetPosition - it }
+            ?: Int.MAX_VALUE
+
+        if (distanceToLatest > MAX_SMOOTH_SCROLL_MESSAGES) {
+            layoutManager.scrollToPositionWithOffset(targetPosition, messageList.height - 80)
+        } else {
+            messageList.smoothScrollToPosition(targetPosition)
+        }
+    }
+
+    private fun focusComposer() {
+        message.post {
+            if (!message.isFocused) {
+                message.requestFocus()
+            }
+            message.setSelection(message.text?.length ?: 0)
+        }
+    }
+
+    private fun focusFirstVisibleMessageAtTop(): Boolean {
+        val lm = messageList.layoutManager as? LinearLayoutManager ?: return false
+        val position = lm.findFirstVisibleItemPosition()
+            .takeIf { it != RecyclerView.NO_POSITION }
+            ?: lm.findFirstCompletelyVisibleItemPosition().takeIf { it != RecyclerView.NO_POSITION }
+            ?: return false
+
+        messageList.post {
+            lm.findViewByPosition(position)?.let(::alignItemTop)
+        }
+        return true
+    }
+
+    private fun alignItemBottom(itemView: View) {
+        if (!isDescendantOf(messageList, itemView)) return
+
+        val rect = Rect()
+        itemView.getDrawingRect(rect)
+        messageList.offsetDescendantRectToMyCoords(itemView, rect)
+
+        val visibleBottom = messageList.height - messageList.paddingBottom
+        val delta = rect.bottom - visibleBottom
+        if (delta > 0) {
+            messageList.scrollBy(0, delta)
+        }
+        if (!itemView.isFocused) {
+            itemView.requestFocus()
+        }
+    }
+
+    private fun alignItemTop(itemView: View) {
+        if (!isDescendantOf(messageList, itemView)) return
+
+        val rect = Rect()
+        itemView.getDrawingRect(rect)
+        messageList.offsetDescendantRectToMyCoords(itemView, rect)
+
+        val visibleTop = messageList.paddingTop
+        val delta = rect.top - visibleTop
+        if (delta < 0) {
+            messageList.scrollBy(0, delta)
+        }
+        if (!itemView.isFocused) {
+            itemView.requestFocus()
+        }
+    }
+
+    private fun focusToolbarAction(): Boolean {
+        val target = when {
+            toolbarTitle.isVisible -> toolbarTitle
+            headerAddRecipient.isVisible -> headerAddRecipient
+            headerViewRecipients.isVisible -> headerViewRecipients
+            else -> null
+        } ?: return false
+
+        if (!target.isFocused) {
+            target.requestFocus()
+        }
+        return true
+    }
+
+    private fun focusHeaderAction(): Boolean {
+        if (sendAsGroup.isVisible && sendAsGroupBackground.isShown) {
+            if (!sendAsGroupBackground.isFocused) {
+                sendAsGroupBackground.requestFocus()
+            }
+            return true
+        }
+
+        return focusToolbarAction()
     }
 
     private fun initClicks() {
-        attach_tv.setOnClickListener {
-            val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
-//            View view = LayoutInflater.from({context}).inflate(R.layout.{XML_name}, null);
-//            TextView tv_year = (TextView)view.findViewById(R.id.tv_year);
-         //   toolbar.menu.findItem(R.id.call)?.isVisible =
-            popUp.inflate(R.menu.attach_menu)
-            popUp.menu.findItem(R.id.cancel)?.isVisible=false
-            //messageAdapter.cancelSending.onNext(messageAdapter.getItemId(1))
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                popUp.setForceShowIcon(true)
+        attachTv.setOnClickListener {
+            val items = mutableListOf(
+                R.id.photo_menu,
+                R.id.audio_menu,
+                R.id.video_menu,
+                R.id.attach_contact
+            )
+            if (hasClipboardText()) {
+                items += R.id.paste
             }
-            popUp.setOnMenuItemClickListener { item ->
-                optionsItemIntent.onNext(item.itemId)
-
-
-                true
+            val messageCount = messageAdapter.data?.size ?: 0
+            if (messageCount == 0 || forceExpandedRecipientsEditor) {
+                items += R.id.add
             }
-            popUp.show()
+            items += R.id.more_menu
+            showCompactMenu(R.string.options, items)
+        }
+        moreTv.setOnClickListener {
+            showAttachmentMoreMenu()
+        }
+        headerAddRecipient.setOnClickListener {
+            forceExpandedRecipientsEditor = true
+            optionsItemIntent.onNext(R.id.add)
+        }
+        headerViewRecipients.setOnClickListener {
+            optionsItemIntent.onNext(R.id.view_recipients)
+        }
+    }
+    private fun isDescendantOf(parent: ViewGroup, child: View?): Boolean {
+        var current = child
+        while (current != null) {
+            if (current === parent) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    private fun findMessageItemView(view: View?): View? {
+        var current = view
+        while (current != null && current.parent is View && current.parent !== messageList) {
+            current = current.parent as? View
+        }
+        return current
+    }
+
+    private fun findFocusedMessage(): Message? {
+        val itemView = findMessageItemView(currentFocus) ?: return null
+        val position = messageList.findContainingViewHolder(itemView)
+            ?.adapterPosition
+            ?.takeIf { it != RecyclerView.NO_POSITION }
+            ?: return null
+
+        return messageAdapter.getItem(position)
+    }
+
+    private fun rememberFocusedMessageForRestore(): Boolean {
+        val message = findFocusedMessage() ?: return false
+        lastFocusedMessageId = message.id
+        return true
+    }
+
+    private fun rememberMessageByIdForRestore(messageId: Long): Boolean {
+        lastFocusedMessageId = messageId
+        return true
+    }
+
+    private fun rememberMessageForPartRestore(partId: Long): Boolean {
+        val messageId = messageAdapter.data
+            ?.firstOrNull { message -> message.parts.any { part -> part.id == partId } }
+            ?.id
+            ?: return false
+
+        return rememberMessageByIdForRestore(messageId)
+    }
+
+    private fun restoreLastFocusedMessageIfVisible() {
+        val messageId = lastFocusedMessageId ?: return
+        messageList.post {
+            val lm = messageList.layoutManager as? LinearLayoutManager ?: return@post
+            val position = messageAdapter.data
+                ?.indexOfLast { message -> message.id == messageId }
+                ?.takeIf { position -> position != -1 }
+                ?: return@post
+
+            val existingView = lm.findViewByPosition(position)
+            if (existingView?.isShown == true) {
+                requestFocusWithinMessageItem(existingView)
+                return@post
+            }
+
+            lm.scrollToPositionWithOffset(position, 0)
+            messageList.post restoreFocus@{
+                val itemView = lm.findViewByPosition(position) ?: return@restoreFocus
+                requestFocusWithinMessageItem(itemView)
+            }
         }
     }
 
+    private fun ensureComposeFocus() {
+        contentView.removeCallbacks(ensureComposeFocusRunnable)
+        contentView.post(ensureComposeFocusRunnable)
+    }
+
+    private fun forceComposeInteractionFocus() {
+        contentView.removeCallbacks(ensureComposeFocusRunnable)
+        contentView.removeCallbacks(forceComposeInteractionFocusRunnable)
+        contentView.post(forceComposeInteractionFocusRunnable)
+    }
+
+    private fun restoreLastFocusedMessageIfVisibleIfAvailable(): Boolean {
+        val messageId = lastFocusedMessageId ?: return false
+        val layoutManager = messageList.layoutManager as? LinearLayoutManager ?: return false
+        val position = messageAdapter.data
+            ?.indexOfLast { message -> message.id == messageId }
+            ?.takeIf { it != -1 }
+            ?: return false
+
+        val existingView = layoutManager.findViewByPosition(position)
+        if (existingView?.isShown == true) {
+            requestFocusWithinMessageItem(existingView)
+            return true
+        }
+
+        return false
+    }
+
+    private fun requestFocusWithinMessageItem(itemView: View) {
+        if (message.isFocused) {
+            message.clearFocus()
+        }
+
+        val attachmentsView = itemView.findViewById<RecyclerView?>(R.id.attachments)
+        val attachmentChild = attachmentsView
+            ?.takeIf { it.isShown && it.childCount > 0 }
+            ?.getChildAt(0)
+
+        val preferredTarget = attachmentChild
+            ?: attachmentsView?.takeIf { it.isShown && it.isFocusable }
+            ?: itemView.findViewById<View?>(R.id.body)?.takeIf { it.isShown && it.isFocusable }
+            ?: itemView
+
+        if (!preferredTarget.isFocused) {
+            preferredTarget.requestFocus()
+        }
+    }
+
+    private fun showInAppAudioRecordingDialog() {
+        audioRecordingDialog?.dismiss()
+        suppressAudioRecordingDialogCancel = false
+        val dialogView = layoutInflater.inflate(R.layout.compose_audio_record_dialog, null)
+        audioRecordingDialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(true)
+            .setOnCancelListener {
+                if (suppressAudioRecordingDialogCancel) {
+                    suppressAudioRecordingDialogCancel = false
+                } else {
+                    discardInAppAudioRecording()
+                }
+            }
+            .show()
+
+        audioRecordingDialog?.window?.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+        updateAudioRecordingDialog()
+    }
+
+    private fun updateAudioRecordingDialog() {
+        val dialog = audioRecordingDialog ?: return
+        val actionButton = dialog.findViewById<View>(R.id.audioRecordActionButton) ?: return
+        val statusView = dialog.findViewById<TextView>(R.id.audioRecordStatus) ?: return
+
+        when (audioRecordingState) {
+            AudioRecordingState.IDLE -> {
+                actionButton.background = ContextCompat.getDrawable(this, R.drawable.compose_audio_record_button_background)
+                (actionButton as? TextView)?.text = "\uD83C\uDFA4"
+                actionButton.contentDescription = getString(R.string.compose_audio_start_action)
+                statusView.text = getString(R.string.compose_audio_record_idle_compact)
+                actionButton.setOnClickListener {
+                    beginInAppAudioRecording()
+                }
+            }
+
+            AudioRecordingState.RECORDING -> {
+                actionButton.background = ContextCompat.getDrawable(this, R.drawable.compose_audio_record_button_background_recording)
+                (actionButton as? TextView)?.text = "\u25A0"
+                actionButton.contentDescription = getString(R.string.compose_audio_stop_action)
+                statusView.text = getString(R.string.compose_audio_recording_compact)
+                actionButton.setOnClickListener {
+                    finishInAppAudioRecording()
+                }
+            }
+
+            AudioRecordingState.RECORDED -> {
+                actionButton.background = ContextCompat.getDrawable(this, R.drawable.compose_audio_record_button_background_ready)
+                (actionButton as? TextView)?.text = "\u2713"
+                actionButton.contentDescription = getString(R.string.compose_attach_action)
+                statusView.text = getString(R.string.compose_audio_record_ready_compact)
+                actionButton.setOnClickListener {
+                    attachRecordedAudio()
+                }
+            }
+        }
+
+        actionButton.post {
+            if (!actionButton.isFocused) {
+                actionButton.requestFocus()
+            }
+        }
+    }
+
+    private fun beginInAppAudioRecording() {
+        discardInAppAudioRecording()
+
+        val recordingsDir = File(cacheDir, "recordings").apply { mkdirs() }
+        runCatching { File(recordingsDir, ".nomedia").createNewFile() }
+        val outputFile = File(
+            recordingsDir,
+            "audio_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.amr"
+        )
+
+        val recorder = MediaRecorder()
+        try {
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.AMR_NB)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+            recorder.setOutputFile(outputFile.absolutePath)
+            recorder.prepare()
+            recorder.start()
+        } catch (error: Exception) {
+            recorder.release()
+            outputFile.delete()
+            Toast.makeText(this, R.string.compose_audio_record_error, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        audioRecorder = recorder
+        recordingAudioFile = outputFile
+        audioRecordingState = AudioRecordingState.RECORDING
+        if (audioRecordingDialog == null) {
+            showInAppAudioRecordingDialog()
+        } else {
+            updateAudioRecordingDialog()
+        }
+    }
+
+    private fun finishInAppAudioRecording() {
+        val recorder = audioRecorder ?: return
+
+        audioRecorder = null
+
+        val outputFile = recordingAudioFile
+
+        var recordedSuccessfully = true
+        try {
+            recorder.stop()
+        } catch (error: RuntimeException) {
+            recordedSuccessfully = false
+            outputFile?.delete()
+            Toast.makeText(this, R.string.compose_audio_record_error, Toast.LENGTH_SHORT).show()
+        } finally {
+            recorder.reset()
+            recorder.release()
+        }
+
+        if (recordedSuccessfully && outputFile != null && outputFile.exists()) {
+            audioRecordingState = AudioRecordingState.RECORDED
+            updateAudioRecordingDialog()
+        } else {
+            recordingAudioFile = null
+            audioRecordingState = AudioRecordingState.IDLE
+            updateAudioRecordingDialog()
+        }
+    }
+
+    private fun attachRecordedAudio() {
+        val outputFile = recordingAudioFile
+        if (outputFile == null || !outputFile.exists()) {
+            audioRecordingState = AudioRecordingState.IDLE
+            updateAudioRecordingDialog()
+            return
+        }
+
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", outputFile)
+        audioSelectedIntent.onNext(uri)
+        recordingAudioFile = null
+        audioRecordingState = AudioRecordingState.IDLE
+        suppressAudioRecordingDialogCancel = true
+        audioRecordingDialog?.dismiss()
+        audioRecordingDialog = null
+    }
+
+    private fun discardInAppAudioRecording() {
+        audioRecorder?.let { recorder ->
+            try {
+                recorder.stop()
+            } catch (_: RuntimeException) {
+            } finally {
+                recorder.reset()
+                recorder.release()
+            }
+        }
+        audioRecorder = null
+        recordingAudioFile?.delete()
+        recordingAudioFile = null
+        audioRecordingState = AudioRecordingState.IDLE
+    }
     override fun initSecondMenu() {
+        showCompactMenu(
+            R.string.compose_attach_cd,
+            listOf(R.id.photo_menu, R.id.audio_menu, R.id.video_menu, R.id.attach_contact)
+        )
+    }
 
-        val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
-        popUp.inflate(R.menu.attach_second_menu)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            popUp.setForceShowIcon(true)
+    override fun initMoreMenu() {
+        val items = mutableListOf<Int>()
+        if (hasMultipleRecipientsForMenu) {
+            items += R.id.view_recipients
         }
-        popUp.setOnMenuItemClickListener { item ->
-            optionsItemIntent.onNext(item.itemId)
-            true
-        }
-        popUp.show()
-
+        items += listOf(R.id.search, R.id.schedule_message, R.id.call, R.id.info)
+        showCompactMenu(R.string.drawer_more, items)
     }
 
     override fun initPhotoMenu() {
-
-        val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
-        popUp.inflate(R.menu.attach_photo_menu)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            popUp.setForceShowIcon(true)
-        }
-        popUp.setOnMenuItemClickListener { item ->
-            optionsItemIntent.onNext(item.itemId)
-            true
-        }
-        popUp.show()
-
+        showCompactMenu(R.string.compose_gallery_cd, listOf(R.id.take_photo, R.id.attach_photo))
     }
-    override fun pasteText()
-    {
+
+    override fun initAudioMenu() {
+        showCompactMenu(R.string.compose_audio_cd, listOf(R.id.record_audio, R.id.attach_audio))
+    }
+
+    override fun pasteText() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = clipboard.primaryClip
 
         if (clip != null && clip.itemCount > 0) {
             val text = clip.getItemAt(0).coerceToText(this@ComposeActivity)
-            // Use the 'text' variable to access the copied text
-            setDraft(text as String)
+            appendDraftText(text)
         }
+    }
+
+    private fun hasClipboardText(): Boolean {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip ?: return false
+        if (clip.itemCount <= 0) return false
+
+        val text = clip.getItemAt(0).coerceToText(this)?.toString()?.trim()
+        return !text.isNullOrEmpty()
     }
 
     override fun initVideoMenu() {
-
-        val popUp = PopupMenu(this, attach_tv, Gravity.BOTTOM)
-        popUp.inflate(R.menu.attach_video_menu)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            popUp.setForceShowIcon(true)
-        }
-        popUp.setOnMenuItemClickListener { item ->
-            optionsItemIntent.onNext(item.itemId)
-            true
-        }
-        popUp.show()
-
+        showCompactMenu(R.string.compose_video_cd, listOf(R.id.record_video, R.id.attach_video))
     }
+
+    private fun showCompactMenu(titleRes: Int, itemIds: List<Int>) {
+        compactMenuDialog?.dismiss()
+
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.options_dialog)
+        dialog.setCancelable(true)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+
+        val titleView = dialog.findViewById<TextView>(R.id.options_dialog_title)
+        val listView = dialog.findViewById<ListView>(R.id.option_dialog_list_view)
+        titleView.text = getString(titleRes)
+        val labels = itemIds.map(::compactMenuLabel)
+        listView.adapter = ArrayAdapter(this, R.layout.options_dialog_list_item, labels)
+        listView.setOnItemClickListener { _, _, position, _ ->
+            if (itemIds[position] == R.id.add) {
+                forceExpandedRecipientsEditor = true
+            }
+            if (itemIds[position] == R.id.search) {
+                enterComposeSearchMode()
+            } else {
+                optionsItemIntent.onNext(itemIds[position])
+            }
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        listView.post {
+            if (!listView.isFocused) {
+                listView.requestFocus()
+            }
+        }
+        compactMenuDialog = dialog
+    }
+
+    private fun showAttachmentMoreMenu() {
+        if (currentAttachments.isEmpty()) {
+            triggerSend("attachmentMoreEmpty")
+            return
+        }
+
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        val playable = currentAttachments
+            .mapIndexedNotNull { index, attachment ->
+                if (attachment.isPlayablePendingAttachment()) index to attachment else null
+            }
+
+        playable.forEachIndexed { playableIndex, indexedAttachment ->
+            val (_, attachment) = indexedAttachment
+            labels += if (playable.size == 1) {
+                getString(R.string.compose_attachment_play_short)
+            } else {
+                getString(R.string.compose_attachment_play_numbered_short, playableIndex + 1)
+            }
+            actions += { playPendingAttachment(attachment) }
+        }
+
+        currentAttachments.forEachIndexed { index, attachment ->
+            labels += if (currentAttachments.size == 1) {
+                getString(R.string.compose_attachment_remove_short)
+            } else {
+                getString(R.string.compose_attachment_remove_numbered_short, index + 1)
+            }
+            actions += { attachmentAdapter.attachmentDeleted.onNext(attachment) }
+        }
+
+        if (currentAttachments.size > 1) {
+            labels += getString(R.string.compose_attachment_remove_all_short)
+            actions += {
+                currentAttachments.toList().forEach(attachmentAdapter.attachmentDeleted::onNext)
+            }
+        }
+
+        labels += getString(R.string.send)
+        actions += { triggerSend("attachmentMore") }
+
+        showActionMenu(getString(R.string.compose_attachment_menu_title), labels, actions)
+    }
+
+    private fun showActionMenu(title: String, labels: List<String>, actions: List<() -> Unit>) {
+        compactMenuDialog?.dismiss()
+
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.options_dialog)
+        dialog.setCancelable(true)
+        dialog.setCanceledOnTouchOutside(true)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+
+        val titleView = dialog.findViewById<TextView>(R.id.options_dialog_title)
+        val listView = dialog.findViewById<ListView>(R.id.option_dialog_list_view)
+        titleView.text = title
+        listView.adapter = ArrayAdapter(this, R.layout.options_dialog_list_item, labels)
+        listView.setOnItemClickListener { _, _, position, _ ->
+            dialog.dismiss()
+            actions[position].invoke()
+        }
+
+        dialog.show()
+        listView.post {
+            if (!listView.isFocused) {
+                listView.requestFocus()
+            }
+        }
+        compactMenuDialog = dialog
+    }
+
+    private fun Attachment.isPlayablePendingAttachment(): Boolean {
+        return when (this) {
+            is Attachment.Video -> true
+            is Attachment.File -> getContentType(this@ComposeActivity)
+                ?.startsWith("audio/", ignoreCase = true) == true
+            else -> false
+        }
+    }
+
+    private fun playPendingAttachment(attachment: Attachment) {
+        if (attachment is Attachment.File &&
+            attachment.getContentType(this)?.startsWith("audio/", ignoreCase = true) == true
+        ) {
+            val index = currentAttachments.indexOfFirst { it === attachment || it == attachment }
+            if (index == -1) return
+
+            attachments.scrollToPosition(index)
+            attachments.post {
+                val holder = attachments.findViewHolderForAdapterPosition(index)
+                if (holder?.itemView?.performClick() != true) {
+                    Toast.makeText(this, R.string.gallery_error, Toast.LENGTH_SHORT).show()
+                }
+            }
+            return
+        }
+
+        openPendingAttachment(attachment)
+    }
+
+    private fun openPendingAttachment(attachment: Attachment) {
+        val uri = when (attachment) {
+            is Attachment.Video -> attachment.getUri()
+            is Attachment.File -> attachment.getUri()
+            is Attachment.Image -> attachment.getUri()
+            is Attachment.Contact -> null
+        } ?: return
+
+        val type = when (attachment) {
+            is Attachment.Video -> attachment.getContentType(this)
+            is Attachment.File -> attachment.getContentType(this)
+            is Attachment.Image -> contentResolver.getType(uri)
+            is Attachment.Contact -> null
+        } ?: "*/*"
+
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, type)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        try {
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+            } else {
+                startActivity(Intent.createChooser(intent, null))
+            }
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.gallery_error, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun compactMenuLabel(itemId: Int): String = when (itemId) {
+        R.id.attach_second_menu -> getString(R.string.attach)
+        R.id.paste -> getString(R.string.compose_paste)
+        R.id.add -> getString(R.string.menu_add_person)
+        R.id.more_menu -> getString(R.string.menu_more_ellipsis)
+        R.id.search -> getString(R.string.compose_menu_search)
+        R.id.photo_menu -> getString(R.string.compose_gallery_cd)
+        R.id.audio_menu -> getString(R.string.compose_audio_cd)
+        R.id.video_menu -> getString(R.string.compose_video_cd)
+        R.id.attach_contact -> getString(R.string.compose_contact_cd)
+        R.id.take_photo -> getString(R.string.compose_camera_cd)
+        R.id.attach_photo -> getString(R.string.compose_gallery_cd)
+        R.id.record_audio -> getString(R.string.compose_audio_record_cd)
+        R.id.attach_audio -> getString(R.string.compose_audio_cd)
+        R.id.record_video -> getString(R.string.compose_video_record_cd)
+        R.id.attach_video -> getString(R.string.compose_video_cd)
+        R.id.view_recipients -> getString(R.string.menu_view_recipients)
+        R.id.schedule_message -> getString(R.string.compose_schedule_cd)
+        R.id.call -> getString(R.string.menu_call)
+        R.id.info -> getString(R.string.info_title)
+        else -> itemId.toString()
+    }
+
+    private fun enterComposeSearchMode() {
+        if (!composeSearchMode) {
+            draftBeforeSearch = message.text?.toString().orEmpty()
+            composeSearchMode = true
+        }
+
+        message.setText("")
+        message.hint = getString(R.string.compose_menu_search)
+        message.requestFocus()
+        message.setSelection(0)
+        searchQueryIntent.onNext("")
+    }
+
+    private fun exitComposeSearchMode() {
+        composeSearchMode = false
+        optionsItemIntent.onNext(R.id.clear)
+        message.hint = getString(R.string.compose_hint)
+        message.setText(draftBeforeSearch)
+        message.setSelection(message.text?.length ?: 0)
+        message.requestFocus()
+    }
+
     override fun showContactsDialog(contacts: MutableList<String>) {
         val adapter: ArrayAdapter<String> =
-            ArrayAdapter(this, android.R.layout.simple_list_item_1,contacts)
+            ArrayAdapter(this, android.R.layout.simple_list_item_1, contacts)
 
         AlertDialog.Builder(this)
             .setTitle("Select")
@@ -813,38 +2103,98 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 val contact = contacts[position]
 
                 onLinkClicked(contact)
-                            }
+            }
 
             .setNegativeButton("Cancel", null)
 
             .show()
     }
+
+    override fun showRecipientsDialog(recipients: List<Recipient>) {
+        val adapter = object : ArrayAdapter<Recipient>(this, R.layout.recipient_dialog_item, recipients) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView ?: layoutInflater.inflate(R.layout.recipient_dialog_item, parent, false)
+                val recipient = getItem(position) ?: return view
+
+                val avatar = view.findViewById<com.moez.QKSMS.common.widget.GroupAvatarView>(R.id.avatar)
+                val title = view.findViewById<TextView>(R.id.title)
+                val subtitle = view.findViewById<TextView>(R.id.subtitle)
+
+                avatar.recipients = listOf(recipient)
+                title.text = recipient.contact?.name?.takeIf { it.isNotBlank() } ?: recipient.address
+                subtitle.text = recipient.address
+
+                return view
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.menu_view_recipients)
+            .setAdapter(adapter, null)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
     private fun onLinkClicked(link: String) {
         val message = if (android.util.Patterns.PHONE.matcher(link).matches()) {
             openDialerWithPhoneNumber(link)
         } else if (android.util.Patterns.EMAIL_ADDRESS.matcher(link).matches()) {
-           openEmail(link)
+            openEmail(link)
         } else {
             "Link clicked: $link"
         }
         // Show the message using Toast or some other method
     }
+
     private fun openDialerWithPhoneNumber(phoneNumber: String) {
         val dialIntent = Intent(Intent.ACTION_DIAL)
         dialIntent.data = Uri.parse("tel:$phoneNumber")
         startActivity(dialIntent)
     }
+
     private fun openEmail(email: String) {
         val emailIntent = Intent(Intent.ACTION_SENDTO)
         emailIntent.data = Uri.parse("mailto:$email")
         startActivity(emailIntent)
     }
-      fun showOptionsDialog(isMms: Boolean) {
 
+    private fun selectedMessagesCanSave(messageIds: List<Long>): Boolean {
+        val selected = messageAdapter.data
+            ?.filter { message -> messageIds.contains(message.id) }
+            .orEmpty()
+
+        return selected.any { message ->
+            message.isMms() && message.parts.any { part ->
+                part != null && (
+                    part.isImage() ||
+                        part.isVideo() ||
+                        part.type.startsWith("audio/") ||
+                        (!part.isText() && !part.isSmil())
+                    )
+            }
+        }
+    }
+
+    fun showOptionsDialog(isMms: Boolean) {
+        rememberFocusedMessageForRestore()
+        val selectedMessageIds = messageAdapter.getSelection().toList()
+        messageOptionsSelectionIntent.onNext(selectedMessageIds)
+        val canSave = selectedMessagesCanSave(selectedMessageIds)
+
+        fun dispatchMessageOption(itemId: Int, action: String, restoreFocus: Boolean = false) {
+            if (restoreFocus) {
+                pendingRestoreMessageFocusOnResume = true
+            }
+            Log.d("QK-MSGOPT", "action=$action selection=$selectedMessageIds")
+            val optionAction = ComposeView.MessageOptionAction(itemId, selectedMessageIds)
+            messageOptionsSelectionIntent.onNext(selectedMessageIds)
+            clearSelection()
+            viewModel.onMessageOptionAction(optionAction, this@ComposeActivity)
+        }
 
         val listener = object : ComposeOptionsDialog.OnComposeOptionsDialogItemClickListener {
             override fun onCopyMessageClicked() {
-                optionsItemIntent.onNext(R.id.copy)
+                dispatchMessageOption(R.id.copy, "copy")
             }
 
             override fun onPasteMessageClicked(dialog: ComposeOptionsDialog) {
@@ -855,10 +2205,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
                 if (clip != null && clip.itemCount > 0) {
                     val text = clip.getItemAt(0).coerceToText(this@ComposeActivity)
-                    // Use the 'text' variable to access the copied text
-                    setDraft(text as String)
+                    appendDraftText(text)
                 }
-
 
                 clearSelection()
                 dialog.dismiss()
@@ -866,42 +2214,35 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             }
 
             override fun onDeleteMessagesClicked() {
-                optionsItemIntent.onNext(R.id.delete)
+                dispatchMessageOption(R.id.delete, "delete")
             }
 
             override fun onForwardMessageClicked() {
-                optionsItemIntent.onNext(R.id.forward)
+                dispatchMessageOption(R.id.forward, "forward", restoreFocus = true)
             }
 
             override fun onMessageInfoClicked() {
-                optionsItemIntent.onNext(R.id.details)
-            }
-
-            override fun onMessageCallClicked() {
-                optionsItemIntent.onNext(R.id.call)
+                dispatchMessageOption(R.id.details, "details")
             }
 
             override fun onSaveClicked() {
-
-                optionsItemIntent.onNext(R.id.save)
-            }
-            override fun onPlayClicked() {
-                optionsItemIntent.onNext(R.id.play)
+                dispatchMessageOption(R.id.save, "save")
             }
 
         }
 
-        val dialog = ComposeOptionsDialog(this@ComposeActivity, listener, isMMS)
+        val dialog = ComposeOptionsDialog(this@ComposeActivity, listener, canSave)
+
+        optionsDialogShownForSelection = true
 
         dialog.setOnDismissListener {
+            optionsDialogShownForSelection = false
             if (!(it as ComposeOptionsDialog).isClickDismissed) {
                 clearSelection()
+                restoreLastFocusedMessageIfVisible()
             }
         }
-
 
         dialog.show()
     }
-
-
 }

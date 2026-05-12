@@ -88,4 +88,6 @@ interface AppComponent {
     fun inject(view: QkSwitch)
     fun inject(view: QkTextView)
 
+    fun notificationManager(): com.moez.QKSMS.manager.NotificationManager
+
 }

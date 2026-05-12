@@ -21,6 +21,7 @@ package com.moez.QKSMS.feature.compose.part
 import android.content.Context
 import android.view.Gravity
 import android.widget.FrameLayout
+import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.base.QkViewHolder
@@ -45,6 +46,9 @@ class VCardBinder @Inject constructor(colors: Colors, private val context: Conte
 
     override val partLayout = R.layout.mms_vcard_list_item
     override var theme = colors.theme()
+    private val incomingBubbleColor = ContextCompat.getColor(context, R.color.threadBubbleIncoming)
+    private val outgoingBubbleColor = ContextCompat.getColor(context, R.color.threadBubbleOutgoing)
+    private val bubbleTextColor = ContextCompat.getColor(context, R.color.threadBubbleText)
 
     override fun canBindPart(part: MmsPart) = part.isVCard()
 
@@ -75,17 +79,17 @@ class VCardBinder @Inject constructor(colors: Colors, private val context: Conte
         val params = holder.vCardBackground.layoutParams as FrameLayout.LayoutParams
         if (!message.isMe()) {
             holder.vCardBackground.layoutParams = params.apply { gravity = Gravity.START }
-            holder.vCardBackground.setBackgroundTint(theme.theme)
-            holder.vCardAvatar.setTint(theme.textPrimary)
-            holder.name.setTextColor(theme.textPrimary)
-            holder.labelNumber.setTextColor(theme.textTertiary)
+            holder.vCardBackground.setBackgroundTint(incomingBubbleColor)
+            holder.vCardAvatar.setTint(bubbleTextColor)
+            holder.name.setTextColor(bubbleTextColor)
+            holder.labelNumber.setTextColor(bubbleTextColor)
 
         } else {
             holder.vCardBackground.layoutParams = params.apply { gravity = Gravity.END }
-            holder.vCardBackground.setBackgroundTint(holder.containerView.context.resolveThemeColor(R.attr.bubbleColor))
-            holder.vCardAvatar.setTint(holder.containerView.context.resolveThemeColor(android.R.attr.textColorSecondary))
-            holder.name.setTextColor(holder.containerView.context.resolveThemeColor(android.R.attr.textColorPrimary))
-            holder.labelNumber.setTextColor(holder.containerView.context.resolveThemeColor(android.R.attr.textColorTertiary))
+            holder.vCardBackground.setBackgroundTint(outgoingBubbleColor)
+            holder.vCardAvatar.setTint(bubbleTextColor)
+            holder.name.setTextColor(bubbleTextColor)
+            holder.labelNumber.setTextColor(bubbleTextColor)
         }
     }
 

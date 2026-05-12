@@ -22,12 +22,17 @@ import com.moez.QKSMS.feature.backup.RestoreBackupService
 import com.moez.QKSMS.injection.scope.ActivityScope
 import com.moez.QKSMS.service.HeadlessSmsSendService
 import com.moez.QKSMS.receiver.SendSmsReceiver
+import com.moez.QKSMS.service.AutoBackupService
 import com.moez.QKSMS.service.AutoDeleteService
 import dagger.Module
 import dagger.android.ContributesAndroidInjector
 
 @Module
 abstract class ServiceBuilderModule {
+
+    @ActivityScope
+    @ContributesAndroidInjector()
+    abstract fun bindAutoBackupService(): AutoBackupService
 
     @ActivityScope
     @ContributesAndroidInjector()

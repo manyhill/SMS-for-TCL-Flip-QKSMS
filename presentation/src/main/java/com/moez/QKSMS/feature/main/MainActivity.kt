@@ -17,7 +17,8 @@
  * along with QKSMS.  If not, see <http://www.gnu.org/licenses/>.
  */
 package com.moez.QKSMS.feature.main
-
+import android.net.Uri
+import com.moez.QKSMS.feature.compose.ComposeActivity
 import android.Manifest
 import android.animation.ObjectAnimator
 import android.app.AlertDialog
@@ -25,6 +26,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.*
 import android.widget.Toast
 import androidx.appcompat.app.ActionBarDrawerToggle
@@ -35,6 +37,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProviders
 import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
 import com.jakewharton.rxbinding2.view.clicks
 import com.jakewharton.rxbinding2.widget.textChanges
@@ -47,12 +51,17 @@ import com.moez.QKSMS.feature.blocking.BlockingDialog
 import com.moez.QKSMS.feature.changelog.ChangelogDialog
 import com.moez.QKSMS.feature.conversations.ConversationItemTouchCallback
 import com.moez.QKSMS.feature.conversations.ConversationsAdapter
+import com.moez.QKSMS.interactor.MarkPinned
+import com.moez.QKSMS.interactor.MarkUnpinned
+import com.moez.QKSMS.manager.NotificationManager
 import com.moez.QKSMS.manager.ChangelogManager
+import com.moez.QKSMS.repository.ConversationRepository
 import com.moez.QKSMS.repository.SyncRepository
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
 import dagger.android.AndroidInjection
 import io.reactivex.Observable
+import io.reactivex.subjects.BehaviorSubject
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
@@ -73,7 +82,20 @@ class MainActivity : QkThemedActivity(), MainView {
     @Inject
     lateinit var navigator: Navigator
 
-    override val composeIntent by lazy { compose.clicks() }
+    @Inject
+    lateinit var notificationManager: NotificationManager
+
+    @Inject
+    lateinit var mainConversationRepo: ConversationRepository
+
+    @Inject
+    lateinit var markPinned: MarkPinned
+
+    @Inject
+    lateinit var markUnpinned: MarkUnpinned
+
+    private val composeClicks: Subject<Unit> = PublishSubject.create()
+    override val composeIntent: Observable<Unit> = composeClicks
 
 
     @Inject
@@ -114,10 +136,16 @@ class MainActivity : QkThemedActivity(), MainView {
         )
     }
     override val optionsItemIntent: Subject<Int> = PublishSubject.create()
+    override val conversationOptionActionIntent: Subject<Pair<Int, List<Long>>> = PublishSubject.create()
+    override val muteConversationIntent: Subject<Long> = PublishSubject.create()
+    override val pinConversationIntent: Subject<Long> = PublishSubject.create()
 //    override val plusBannerIntent by lazy { plusBanner.clicks() }
 //    override val dismissRatingIntent by lazy { rateDismiss.clicks() }
 //    override val rateIntent by lazy { rateOkay.clicks() }
-    override val conversationsSelectedIntent by lazy { conversationsAdapter.selectionChanges }
+    private val conversationSelectionSnapshots: Subject<List<Long>> = BehaviorSubject.createDefault(listOf())
+    override val conversationsSelectedIntent by lazy {
+        Observable.merge(conversationsAdapter.selectionChanges, conversationSelectionSnapshots)
+    }
     override val confirmDeleteIntent: Subject<List<Long>> = PublishSubject.create()
     override val swipeConversationIntent by lazy { itemTouchCallback.swipes }
     override val changelogMoreIntent by lazy { changelogDialog.moreClicks }
@@ -134,27 +162,93 @@ class MainActivity : QkThemedActivity(), MainView {
             this, drawerLayout, toolbar, R.string.main_drawer_open_cd, 0
         )
     }
+    private fun handleExternalSmsIntent(intent: Intent?): Boolean {
+        if (intent?.action != Intent.ACTION_SENDTO && intent?.action != Intent.ACTION_VIEW) return false
+
+        val data = intent.data ?: return false
+        val recipients = getRecipients(data)
+        if (recipients.isBlank()) return false
+
+        val composeIntent = Intent(this, ComposeActivity::class.java).apply {
+            setData(data)
+            intent.getStringExtra(Intent.EXTRA_TEXT)?.let { putExtra(Intent.EXTRA_TEXT, it) }
+        }
+
+        startActivity(composeIntent)
+        return true
+    }
+    private fun getRecipients(uri: Uri): String {
+        val base = Uri.decode(uri.schemeSpecificPart ?: "")
+        val position = base.indexOf('?')
+        return if (position == -1) base else base.substring(0, position)
+    }
     private val itemTouchHelper by lazy { ItemTouchHelper(itemTouchCallback) }
     private val progressAnimator by lazy { ObjectAnimator.ofInt(syncingProgress, "progress", 0, 0) }
     private val changelogDialog by lazy { ChangelogDialog(this) }
     private val snackbar by lazy { findViewById<View>(R.id.snackbar) }
     private val syncing by lazy { findViewById<View>(R.id.syncing) }
     private val backPressedSubject: Subject<NavItem> = PublishSubject.create()
+    private var selectedConversationCount = 0
+    private var conversationOptionsShownForSelection = false
+    private var conversationMultipleSelectionMode = false
+    private var currentOptionsIsArchive = false
+    private var currentOptionsMarkMuted = false
+    private var currentOptionsMarkPinned = true
+    private var currentOptionsMarkRead = true
+    private var lastFocusedConversationId: Long? = null
+    private var pendingRestoreConversationFocus = false
+    private var pendingShowOptionsForSelection = false
+    private var lastSelectedConversationToastCount = 0
+    private var selectedConversationToast: Toast? = null
+    private var didBindMainViewModel = false
+    private var isInboxPage = true
+    private var isArchivedPage = false
+    private var isSearchingPage = false
+    private val delayedConversationRefresh = Runnable {
+        if (recyclerView.adapter === conversationsAdapter) {
+            conversationsAdapter.notifyDataSetChanged()
+        }
+    }
+
+    private fun ensureMainFocus() {
+        if (!hasWindowFocus()) return
+        if (currentFocus != null) return
+        if (!recyclerView.isShown) return
+
+        recyclerView.post {
+            if (!hasWindowFocus()) return@post
+            if (currentFocus != null) return@post
+            if (restoreLastFocusedConversation()) return@post
+
+            val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
+            val firstVisiblePosition = layoutManager?.findFirstVisibleItemPosition()
+                ?.takeIf { it != RecyclerView.NO_POSITION }
+            val firstVisibleRow = firstVisiblePosition
+                ?.let(layoutManager::findViewByPosition)
+                ?.takeIf { it.isShown && it.visibility == View.VISIBLE }
+
+            when {
+                firstVisibleRow?.requestFocus() == true -> Unit
+                !recyclerView.isFocused -> recyclerView.requestFocus()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AndroidInjection.inject(this)
         super.onCreate(savedInstanceState)
+
+        if (handleExternalSmsIntent(intent)) {
+            finish()
+            return
+        }
+
         setContentView(R.layout.main_activity)
-        viewModel.bindView(this)
-        onNewIntentIntent.onNext(intent)
 
         (snackbar as? ViewStub)?.setOnInflateListener { _, _ ->
             snackbarButton.clicks().autoDisposable(scope(Lifecycle.Event.ON_DESTROY))
                 .subscribe(snackbarButtonIntent)
         }
-
-
-
 
         (syncing as? ViewStub)?.setOnInflateListener { _, _ ->
             syncingProgress?.progressTintList = ColorStateList.valueOf(theme.blockingFirst().theme)
@@ -169,27 +263,66 @@ class MainActivity : QkThemedActivity(), MainView {
         }
 
         initClicks()
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        recyclerView.setHasFixedSize(true)
+        recyclerView.isFocusable = true
+        recyclerView.isFocusableInTouchMode = true
+        recyclerView.itemAnimator = null
+        recyclerView.setItemViewCacheSize(6)
+        (recyclerView.layoutManager as? LinearLayoutManager)?.isItemPrefetchEnabled = false
 
-        // remove hamburger icon
         toolbar.navigationIcon = null
 
         itemTouchCallback.adapter = conversationsAdapter
         conversationsAdapter.autoScrollToStart(recyclerView)
+        conversationsAdapter.rowFocused.autoDisposable(scope()).subscribe { conversationId ->
+            lastFocusedConversationId = conversationId
+        }
 
-        // Don't allow clicks to pass through the drawer layout
+        conversationsAdapter.rowLongClicks.autoDisposable(scope()).subscribe { conversationId ->
+            conversationMultipleSelectionMode = false
+            conversationsAdapter.multipleSelectionEnabled = false
+            selectedConversationCount = 1
+            currentOptionsMarkMuted = notificationManager.isConversationMuted(conversationId)
+
+            recyclerView.post {
+                val resolvedMutedState = resolveCurrentMutedState(currentOptionsMarkMuted)
+                val resolvedPinnedState = resolveCurrentPinnedState(currentOptionsMarkPinned)
+                val resolvedReadState = resolveCurrentReadState(currentOptionsMarkRead)
+
+                showOptionsDialog(
+                    currentOptionsIsArchive,
+                    resolvedMutedState,
+                    resolvedPinnedState,
+                    resolvedReadState,
+                    multiOnly = false,
+                    showSelectMultiple = true
+                )
+            }
+        }
+
+        conversationsAdapter.selectionChanges.autoDisposable(scope()).subscribe { selection ->
+            if (conversationMultipleSelectionMode) {
+                selectedConversationCount = selection.size
+                if (selection.isEmpty()) {
+                    lastSelectedConversationToastCount = 0
+                } else {
+                    showSelectedConversationToast(selection.size)
+                }
+            }
+        }
         drawer.clicks().autoDisposable(scope()).subscribe()
 
-        // Set the theme color tint to the recyclerView, progressbar, and FAB
         theme.autoDisposable(scope()).subscribe { theme ->
-            // Set the color for the drawer icons
             val states = arrayOf(
                 intArrayOf(android.R.attr.state_activated),
                 intArrayOf(-android.R.attr.state_activated)
             )
 
             ColorStateList(
-                states, intArrayOf(theme.theme,
+                states,
+                intArrayOf(
+                    theme.theme,
                     resolveThemeColor(android.R.attr.textColorSecondary)
                 )
             ).let { tintList ->
@@ -197,30 +330,47 @@ class MainActivity : QkThemedActivity(), MainView {
                 archivedIcon.imageTintList = tintList
             }
 
-            // Miscellaneous views
             listOf(plusBadge1, plusBadge2).forEach { badge ->
                 badge.setBackgroundTint(theme.theme)
                 badge.setTextColor(theme.textPrimary)
             }
             syncingProgress?.progressTintList = ColorStateList.valueOf(theme.theme)
             syncingProgress?.indeterminateTintList = ColorStateList.valueOf(theme.theme)
-//            plusIcon.setTint(theme.theme)
-//            rateIcon.setTint(theme.theme)
-//            compose.setBackgroundTint(theme.theme)
             linearLayout_compose.setBackgroundTint(theme.theme)
-
-            // Set the FAB compose icon color
-//            compose.setTint(theme.textPrimary)
         }
 
-        // These theme attributes don't apply themselves on API 21
         if (Build.VERSION.SDK_INT <= 22) {
             toolbarSearch.setBackgroundTint(resolveThemeColor(R.attr.bubbleColor))
         }
+
+        bindMainViewModelIfNeeded()
+
+        drawerLayout.post {
+            if (isFinishing || isDestroyed) return@post
+
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                activityResumedIntent.onNext(true)
+            }
+
+            ensureMainFocus()
+        }
     }
 
+    private fun bindMainViewModelIfNeeded() {
+        if (didBindMainViewModel) return
+
+        didBindMainViewModel = true
+        viewModel.bindView(this)
+        onNewIntentIntent.onNext(intent)
+    }
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
+
+        if (handleExternalSmsIntent(intent)) {
+            finish()
+            return
+        }
+
         intent?.run(onNewIntentIntent::onNext)
     }
 
@@ -242,6 +392,12 @@ class MainActivity : QkThemedActivity(), MainView {
             else -> true
         }
 
+        val markMuted = when (state.page) {
+            is Inbox -> state.page.markMuted
+            is Archived -> state.page.markMuted
+            else -> false
+        }
+
         val markRead = when (state.page) {
             is Inbox -> state.page.markRead
             is Archived -> state.page.markRead
@@ -253,8 +409,26 @@ class MainActivity : QkThemedActivity(), MainView {
             is Archived -> state.page.selected
             else -> 0
         }
+        currentOptionsIsArchive = state.page is Archived
+        currentOptionsMarkMuted = markMuted
+        currentOptionsMarkPinned = markPinned
+        currentOptionsMarkRead = markRead
+        isInboxPage = state.page is Inbox
+        isArchivedPage = state.page is Archived
+        isSearchingPage = state.page is Searching
+        selectedConversationCount = selectedConversations
+        if (selectedConversations == 0) {
+            conversationOptionsShownForSelection = false
+            conversationMultipleSelectionMode = false
+            pendingShowOptionsForSelection = false
+            lastSelectedConversationToastCount = 0
+        } else if (selectedConversations > 1) {
+            conversationMultipleSelectionMode = true
+        }
+        conversationsAdapter.multipleSelectionEnabled = conversationMultipleSelectionMode
+        val showSelectionChrome = selectedConversations > 1 || conversationMultipleSelectionMode
 
-        toolbarSearch.setVisible(state.page is Inbox && state.page.selected == 0 || state.page is Searching)
+        toolbarSearch.setVisible(state.page is Inbox && !showSelectionChrome || state.page is Searching)
         toolbarTitle.setVisible(toolbarSearch.visibility != View.VISIBLE)
 //        toolbarSearch.setOnKeyListener { v, keyCode, event ->
 //            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN ) {
@@ -263,17 +437,7 @@ class MainActivity : QkThemedActivity(), MainView {
 //            } else {
 //                false
 //            }}
-        toolbar.menu.findItem(R.id.archive)?.isVisible =
-            state.page is Inbox && selectedConversations != 0
-        toolbar.menu.findItem(R.id.unarchive)?.isVisible =
-            state.page is Archived && selectedConversations != 0
-        toolbar.menu.findItem(R.id.delete)?.isVisible = selectedConversations != 0
-        toolbar.menu.findItem(R.id.add)?.isVisible = addContact && selectedConversations != 0
-        toolbar.menu.findItem(R.id.pin)?.isVisible = markPinned && selectedConversations != 0
-        toolbar.menu.findItem(R.id.unpin)?.isVisible = !markPinned && selectedConversations != 0
-        toolbar.menu.findItem(R.id.read)?.isVisible = markRead && selectedConversations != 0
-        toolbar.menu.findItem(R.id.unread)?.isVisible = !markRead && selectedConversations != 0
-        toolbar.menu.findItem(R.id.block)?.isVisible = selectedConversations != 0
+        toolbar.menu.clear()
 
         listOf(plusBadge1, plusBadge2).forEach { badge ->
             badge.isVisible = drawerBadgesExperiment.variant && !state.upgraded
@@ -290,11 +454,12 @@ class MainActivity : QkThemedActivity(), MainView {
 
         when (state.page) {
             is Inbox -> {
-                showBackButton(state.page.selected > 0)
-                if(state.page.selected>0){
-                    showOptionsDialog(state.page is Archived,state.page.markPinned)
+                showBackButton(showSelectionChrome)
+                title = if (showSelectionChrome) {
+                    getString(R.string.main_title_selected, state.page.selected)
+                } else {
+                    getString(R.string.app_name)
                 }
-                title = getString(R.string.main_title_selected, state.page.selected)
                 if (recyclerView.adapter !== conversationsAdapter) recyclerView.adapter =
                     conversationsAdapter
                 conversationsAdapter.updateData(state.page.data)
@@ -311,16 +476,12 @@ class MainActivity : QkThemedActivity(), MainView {
             }
 
             is Archived -> {
-                showBackButton(state.page.selected > 0)
+                showBackButton(showSelectionChrome)
 
-                if(state.page.selected>0){
-                    showOptionsDialog(state.page is Archived,state.page.markPinned)
-                }
-
-                title = when (state.page.selected != 0) {
-                    true -> getString(R.string.main_title_selected, state.page.selected)
-                    false -> getString(R.string.title_archived)
-
+                title = if (showSelectionChrome) {
+                    getString(R.string.main_title_selected, state.page.selected)
+                } else {
+                    getString(R.string.title_archived)
                 }
 
                 if (recyclerView.adapter !== conversationsAdapter) recyclerView.adapter =
@@ -378,21 +539,65 @@ class MainActivity : QkThemedActivity(), MainView {
                 snackbarButton?.setText(R.string.main_permission_allow)
             }
         }
+
+        ensureMainFocus()
     }
 
     override fun onResume() {
         super.onResume()
+        Log.d(
+            "QK-COMPOSE",
+            "MainActivity onResume selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} focus=${currentFocus?.javaClass?.simpleName ?: "null"}"
+        )
         activityResumedIntent.onNext(true)
+        refreshConversationListState()
+        if (pendingRestoreConversationFocus) {
+            pendingRestoreConversationFocus = false
+            recyclerView.post {
+                if (!restoreLastFocusedConversation()) {
+                    ensureMainFocus()
+                }
+            }
+        } else {
+            ensureMainFocus()
+        }
     }
 
     override fun onPause() {
+        Log.d(
+            "QK-COMPOSE",
+            "MainActivity onPause selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} focus=${currentFocus?.javaClass?.simpleName ?: "null"}"
+        )
+        pendingRestoreConversationFocus = rememberFocusedConversationForRestore()
+        recyclerView.removeCallbacks(delayedConversationRefresh)
+        clearSelection()
         super.onPause()
         activityResumedIntent.onNext(false)
     }
 
     override fun onDestroy() {
+        recyclerView.removeCallbacks(delayedConversationRefresh)
         super.onDestroy()
         disposables.dispose()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            refreshConversationListState(delayed = true)
+            ensureMainFocus()
+        }
+    }
+
+    private fun refreshConversationListState(delayed: Boolean = false) {
+        if (recyclerView.adapter !== conversationsAdapter) return
+
+        conversationsAdapter.notifyDataSetChanged()
+
+        if (delayed) {
+            recyclerView.removeCallbacks(delayedConversationRefresh)
+            recyclerView.postDelayed(delayedConversationRefresh, 250)
+        }
     }
 
     override fun showBackButton(show: Boolean) {
@@ -423,7 +628,7 @@ class MainActivity : QkThemedActivity(), MainView {
     }
 
     override fun clearSelection() {
-        conversationsAdapter.clearSelection()
+        resetConversationSelection()
     }
 
     override fun themeChanged() {
@@ -463,11 +668,32 @@ class MainActivity : QkThemedActivity(), MainView {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        optionsItemIntent.onNext(item.itemId)
+        emitOptionsItem(item.itemId)
         return true
     }
 
     override fun onBackPressed() {
+        Log.d(
+            "QK-LIFE",
+            "onBackPressed selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} drawerOpen=${drawerLayout.isDrawerOpen(GravityCompat.START)}"
+        )
+
+        if (conversationMultipleSelectionMode || selectedConversationCount > 0) {
+            clearSelection()
+            ensureMainFocus()
+            return
+        }
+
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            return
+        }
+
+        if (isInboxPage && !isArchivedPage && !isSearchingPage) {
+            finish()
+            return
+        }
+
         backPressedSubject.onNext(NavItem.BACK)
     }
 
@@ -487,15 +713,16 @@ class MainActivity : QkThemedActivity(), MainView {
 //    }
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         //Toast.makeText(this,"focus: "+ currentFocus.toString(), Toast.LENGTH_LONG).show()
-        return when (event?.keyCode) {
-            1 -> {
-
+        return when (event?.keyCode ?: keyCode) {
+            KeyEvent.KEYCODE_SOFT_LEFT, 1 -> {
+                Log.d(
+                    "QK-COMPOSE",
+                    "softLeftCompose selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} focus=${currentFocus?.javaClass?.simpleName ?: "null"}"
+                )
                 compose.performClick()
                 true
-
-
             }
-            2 -> {
+            KeyEvent.KEYCODE_SOFT_RIGHT, 2 -> {
 
                 openOptions()
                 true
@@ -505,26 +732,202 @@ class MainActivity : QkThemedActivity(), MainView {
     }
 
     private fun openOptions() {
+
+        if (selectedConversationCount > 0) {
+            val resolvedMutedState = resolveCurrentMutedState(currentOptionsMarkMuted)
+            val resolvedPinnedState = resolveCurrentPinnedState(currentOptionsMarkPinned)
+            val resolvedReadState = resolveCurrentReadState(currentOptionsMarkRead)
+
+            Log.d(
+                "QK-PIN",
+                "openOptions selection=${conversationsAdapter.getSelection()} markPinnedDefault=$currentOptionsMarkPinned resolvedMarkPinned=$resolvedPinnedState"
+            )
+
+            showOptionsDialog(
+                currentOptionsIsArchive,
+                resolvedMutedState,
+                resolvedPinnedState,
+                resolvedReadState,
+                multiOnly = conversationMultipleSelectionMode || selectedConversationCount > 1,
+                showSelectMultiple = selectedConversationCount == 1 && !conversationMultipleSelectionMode
+            )
+            return
+        }
+
         if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
             drawerLayout.closeDrawer(GravityCompat.START)
         } else if (!drawerLayout.isDrawerVisible(GravityCompat.START)) {
             drawerLayout.openDrawer(GravityCompat.START)
         }
     }
-
     private fun initClicks() {
+        compose.setOnClickListener {
+            Log.d(
+                "QK-COMPOSE",
+                "composeClick selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} pageInbox=$isInboxPage pageArchived=$isArchivedPage pageSearching=$isSearchingPage"
+            )
+            launchComposeDirect()
+        }
         options.setOnClickListener {
             openOptions()
         }
     }
 
-    private fun showOptionsDialog(isArchive: Boolean,markPinned: Boolean) {
+    private fun launchComposeDirect() {
+        val adapterSelection = conversationsAdapter.getSelection().toList()
+        Log.d(
+            "QK-COMPOSE",
+            "launchComposeDirect before selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=$adapterSelection pageInbox=$isInboxPage pageArchived=$isArchivedPage pageSearching=$isSearchingPage"
+        )
+
+        if (selectedConversationCount > 0 || adapterSelection.isNotEmpty()) {
+            resetConversationSelection()
+        }
+
+        Log.d("QK-COMPOSE", "launchComposeDirect startActivity")
+        navigator.showCompose()
+    }
+
+    private fun resetConversationSelection() {
+        Log.d(
+            "QK-COMPOSE",
+            "resetConversationSelection before selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()}"
+        )
+        conversationMultipleSelectionMode = false
+        pendingShowOptionsForSelection = false
+        selectedConversationCount = 0
+        lastSelectedConversationToastCount = 0
+        conversationsAdapter.multipleSelectionEnabled = false
+        conversationsAdapter.clearSelection()
+        Log.d(
+            "QK-COMPOSE",
+            "resetConversationSelection after selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()}"
+        )
+    }
+
+    private fun showSelectedConversationToast(count: Int) {
+        lastSelectedConversationToastCount = count
+        selectedConversationToast?.cancel()
+        selectedConversationToast = Toast.makeText(
+            this,
+            resources.getQuantityString(R.plurals.conversations_selected_toast, count, count),
+            Toast.LENGTH_SHORT
+        ).also { toast -> toast.show() }
+    }
+
+    private fun resolveCurrentMutedState(defaultValue: Boolean): Boolean {
+        val selectedThreadId = conversationsAdapter.getSelection().singleOrNull() ?: return defaultValue
+        return notificationManager.isConversationMuted(selectedThreadId)
+    }
+
+    private fun resolveCurrentPinnedState(defaultValue: Boolean): Boolean {
+        val selectedThreadId = conversationsAdapter.getSelection().singleOrNull() ?: return defaultValue
+        val position = conversationsAdapter.findPositionById(selectedThreadId)
+        val conversation = conversationsAdapter.getItem(position) ?: return defaultValue
+        return !conversation.pinned
+    }
+
+    private fun resolveCurrentReadState(defaultValue: Boolean): Boolean {
+        val selectedThreadId = conversationsAdapter.getSelection().singleOrNull() ?: return defaultValue
+        val position = conversationsAdapter.findPositionById(selectedThreadId)
+        val conversation = conversationsAdapter.getItem(position) ?: return defaultValue
+        return conversation.unread
+    }
+
+    private fun toggleConversationMute(threadId: Long) {
+        val mutedBefore = notificationManager.isConversationMuted(threadId)
+
+        if (mutedBefore) {
+            notificationManager.unmuteConversation(threadId)
+        } else {
+            notificationManager.muteConversation(threadId)
+        }
+
+        val mutedAfter = notificationManager.isConversationMuted(threadId)
+
+        currentOptionsMarkMuted = mutedAfter
+        conversationsAdapter.notifyDataSetChanged()
+    }
+
+    private fun toggleConversationPin(threadId: Long) {
+        val pinnedBefore = mainConversationRepo.getConversation(threadId)?.pinned ?: false
+        Log.d("QK-PIN", "directActivity toggle threadId=$threadId pinnedBefore=$pinnedBefore")
+
+        if (pinnedBefore) {
+            markUnpinned.execute(listOf(threadId)) {
+                refreshPinnedConversationAfterToggle(threadId, pinnedBefore)
+            }
+        } else {
+            markPinned.execute(listOf(threadId)) {
+                refreshPinnedConversationAfterToggle(threadId, pinnedBefore)
+            }
+        }
+    }
+
+    private fun refreshPinnedConversationAfterToggle(threadId: Long, pinnedBefore: Boolean) {
+        val pinnedAfter = mainConversationRepo.getConversation(threadId)?.pinned ?: pinnedBefore
+        Log.d("QK-PIN", "directActivity toggled threadId=$threadId pinnedAfter=$pinnedAfter")
+
+        currentOptionsMarkPinned = !pinnedAfter
+        conversationsAdapter.updateData(mainConversationRepo.getConversations(currentOptionsIsArchive))
+        recyclerView.postDelayed(delayedConversationRefresh, 80)
+    }
+
+    private fun emitOptionsItem(itemId: Int) {
+        conversationSelectionSnapshots.onNext(conversationsAdapter.getSelection().toList())
+        optionsItemIntent.onNext(itemId)
+    }
+
+    private fun emitConversationOptionAction(itemId: Int) {
+        val selection = conversationsAdapter.getSelection().toList()
+        conversationSelectionSnapshots.onNext(selection)
+        conversationOptionActionIntent.onNext(itemId to selection)
+    }
+
+    private fun rememberFocusedConversationForRestore(): Boolean {
+        val focusedView = currentFocus ?: return false
+        val holder = recyclerView.findContainingViewHolder(focusedView) ?: return false
+        val position = holder.adapterPosition.takeIf { it != RecyclerView.NO_POSITION } ?: return false
+        val conversation = conversationsAdapter.getItem(position) ?: return false
+        lastFocusedConversationId = conversation.id
+        return true
+    }
+
+    private fun restoreLastFocusedConversation(): Boolean {
+        val conversationId = lastFocusedConversationId ?: return false
+        val position = conversationsAdapter.findPositionById(conversationId)
+            .takeIf { it != -1 }
+            ?: return false
+        val layoutManager = recyclerView.layoutManager as? LinearLayoutManager ?: return false
+        val existingView = layoutManager.findViewByPosition(position)
+
+        if (existingView?.isShown == true) {
+            if (!existingView.isFocused) {
+                existingView.requestFocus()
+            }
+            return true
+        }
+
+        layoutManager.scrollToPositionWithOffset(position, 0)
+        recyclerView.post {
+            layoutManager.findViewByPosition(position)
+                ?.takeIf { it.isShown && !it.isFocused }
+                ?.requestFocus()
+        }
+        return true
+    }
+
+    private fun showOptionsDialog(
+        isArchive: Boolean,
+        markMuted: Boolean,
+        markPinned: Boolean,
+        markRead: Boolean,
+        multiOnly: Boolean = conversationMultipleSelectionMode || selectedConversationCount > 1,
+        showSelectMultiple: Boolean = selectedConversationCount == 1 && !conversationMultipleSelectionMode
+    ) {
         val listener = object : MainOptionsDialog.OnMainOptionsDialogItemClickListener {
             override fun onArchiveMessageClicked(isArchive: Boolean) {
-               if(!isArchive)
-                   optionsItemIntent.onNext(R.id.archive)
-                else
-                    optionsItemIntent.onNext(R.id.unarchive)
+                emitConversationOptionAction(R.id.archive)
             }
 
 //            override fun onUnarchiveMessageClicked() {
@@ -532,38 +935,71 @@ class MainActivity : QkThemedActivity(), MainView {
 //            }
 
             override fun onDeleteMessagesClicked() {
-                optionsItemIntent.onNext(R.id.delete)
+                emitConversationOptionAction(R.id.delete)
             }
 
             override fun onAddToContactsClicked() {
-                optionsItemIntent.onNext(R.id.add)
+                emitConversationOptionAction(R.id.add)
             }
 
-            override fun onPinToTopClicked(markPinned: Boolean) {
-                if(markPinned)
-                optionsItemIntent.onNext(R.id.pin)
-                else
-                    optionsItemIntent.onNext(R.id.unpin)
+            override fun onMuteConversationClicked() {
+                val threadId = conversationsAdapter.getSelection().singleOrNull()
+                threadId?.let(::toggleConversationMute)
+                if (!conversationMultipleSelectionMode) {
+                    clearSelection()
+                }
+            }
+
+            override fun onPinToTopClicked() {
+                Log.d(
+                    "QK-PIN",
+                    "popupPinClick selection=${conversationsAdapter.getSelection()} markPinned=$markPinned"
+                )
+                val threadId = conversationsAdapter.getSelection().singleOrNull()
+                threadId?.let(::toggleConversationPin)
+                if (!conversationMultipleSelectionMode) {
+                    clearSelection()
+                }
             }
 //            override fun onUnpinToTopClicked() {
 //                optionsItemIntent.onNext(R.id.unpin)
 //            }
 
-            override fun onMarkUnreadClicked() {
-                optionsItemIntent.onNext(R.id.unread)
+            override fun onMarkReadClicked() {
+                if (markRead) {
+                    emitConversationOptionAction(R.id.read)
+                } else {
+                    emitConversationOptionAction(R.id.unread)
+                }
             }
 
             override fun onBlockClicked() {
-                optionsItemIntent.onNext(R.id.block)
+                emitConversationOptionAction(R.id.block)
+            }
+
+            override fun onSelectMultipleClicked() {
+                conversationMultipleSelectionMode = true
+                conversationsAdapter.multipleSelectionEnabled = true
+                selectedConversationCount.takeIf { it > 0 }?.let(::showSelectedConversationToast)
+                ensureMainFocus()
             }
 
         }
 
-        val dialog = MainOptionsDialog(this@MainActivity, listener, isArchive,markPinned)
-
+        val dialog = MainOptionsDialog(
+            this@MainActivity,
+            listener,
+            isArchive,
+            markMuted,
+            markPinned,
+            markRead,
+            multiOnly,
+            showSelectMultiple
+        )
+        val clearSingleSelectionOnDismiss = showSelectMultiple && !multiOnly
         dialog.setOnDismissListener {
-            if (!(it as MainOptionsDialog).isClickDismissed) {
-                optionsItemIntent.onNext(R.id.clear)
+            if (clearSingleSelectionOnDismiss && !dialog.isClickDismissed) {
+                clearSelection()
             }
         }
 

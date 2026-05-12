@@ -90,6 +90,9 @@ class ThemeAdapter @Inject constructor(
 
                         // Send clicks to the selected subject
                         setOnClickListener { colorSelected.onNext(color) }
+                        isClickable = true
+                        isFocusable = true
+                        isFocusableInTouchMode = true
 
                         // Apply the color to the view
                         theme.setBackgroundTint(color)

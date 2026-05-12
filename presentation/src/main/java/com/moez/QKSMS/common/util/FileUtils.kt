@@ -6,7 +6,9 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import com.moez.QKSMS.common.util.extensions.makeToast
+import java.io.File
 import java.io.InputStream
+import java.util.Locale
 
 object FileUtils {
 
@@ -101,6 +103,56 @@ object FileUtils {
             inputStream?.close()
         }
         makeToast("Video saved successfully")
+    }
+
+    fun Context.saveFileToMusic(sourceFile: File): Boolean {
+        return saveFileToRelativePath(
+            sourceFile = sourceFile,
+            relativePath = Environment.DIRECTORY_MUSIC,
+            fallbackLabel = "Audio"
+        )
+    }
+
+    fun Context.saveFileToDownloads(sourceFile: File): Boolean {
+        return saveFileToRelativePath(
+            sourceFile = sourceFile,
+            relativePath = Environment.DIRECTORY_DOWNLOADS,
+            fallbackLabel = "File"
+        )
+    }
+
+    private fun Context.saveFileToRelativePath(
+        sourceFile: File,
+        relativePath: String,
+        fallbackLabel: String
+    ): Boolean {
+        return try {
+            val displayName = sourceFile.name.takeIf { it.isNotBlank() }
+                ?: "${fallbackLabel}_${System.currentTimeMillis()}"
+            val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(sourceFile.extension.toLowerCase(Locale.getDefault()))
+                ?: "application/octet-stream"
+
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+                put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                put(MediaStore.Downloads.DATE_ADDED, System.currentTimeMillis() / 1000)
+                put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+            }
+
+            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val targetUri = contentResolver.insert(collection, values)
+            if (targetUri != null) {
+                contentResolver.openOutputStream(targetUri)?.use { output ->
+                    sourceFile.inputStream().use { input -> input.copyTo(output) }
+                } != null
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 
 }

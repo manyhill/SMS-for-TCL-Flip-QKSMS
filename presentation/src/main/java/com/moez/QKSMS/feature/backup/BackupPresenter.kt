@@ -28,10 +28,13 @@ import com.moez.QKSMS.interactor.PerformBackup
 import com.moez.QKSMS.manager.BillingManager
 import com.moez.QKSMS.manager.PermissionManager
 import com.moez.QKSMS.repository.BackupRepository
+import com.moez.QKSMS.service.AutoBackupService
+import com.moez.QKSMS.util.Preferences
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
 import io.reactivex.rxkotlin.plusAssign
 import io.reactivex.rxkotlin.withLatestFrom
+import io.reactivex.Observable
 import io.reactivex.subjects.BehaviorSubject
 import io.reactivex.subjects.Subject
 import java.util.concurrent.TimeUnit
@@ -44,10 +47,12 @@ class BackupPresenter @Inject constructor(
     private val dateFormatter: DateFormatter,
     private val navigator: Navigator,
     private val performBackup: PerformBackup,
-    private val permissionManager: PermissionManager
+    private val permissionManager: PermissionManager,
+    private val prefs: Preferences
 ) : QkPresenter<BackupView, BackupState>(BackupState()) {
 
     private val storagePermissionSubject: Subject<Boolean> = BehaviorSubject.createDefault(permissionManager.hasStorage())
+    private val backupRefreshSubject: Subject<Unit> = BehaviorSubject.createDefault(Unit)
 
     init {
         disposables += backupRepo.getBackupProgress()
@@ -55,13 +60,20 @@ class BackupPresenter @Inject constructor(
                 .distinctUntilChanged()
                 .subscribe { progress -> newState { copy(backupProgress = progress) } }
 
+        disposables += backupRepo.getBackupProgress()
+                .filter { progress -> progress is BackupRepository.Progress.Finished }
+                .subscribe { backupRefreshSubject.onNext(Unit) }
+
         disposables += backupRepo.getRestoreProgress()
                 .sample(16, TimeUnit.MILLISECONDS)
                 .distinctUntilChanged()
                 .subscribe { progress -> newState { copy(restoreProgress = progress) } }
 
-        disposables += storagePermissionSubject
-                .distinctUntilChanged()
+        disposables += Observable
+                .combineLatest(
+                        storagePermissionSubject.distinctUntilChanged(),
+                        backupRefreshSubject.startWith(Unit)
+                ) { hasPermission, _ -> hasPermission }
                 .switchMap { backupRepo.getBackups() }
                 .doOnNext { backups -> newState { copy(backups = backups) } }
                 .map { backups -> backups.map { it.date }.max() ?: 0L }
@@ -76,6 +88,12 @@ class BackupPresenter @Inject constructor(
 
         disposables += billingManager.upgradeStatus
                 .subscribe { upgraded -> newState { copy(upgraded = upgraded) } }
+
+        disposables += prefs.autoBackup.asObservable()
+                .subscribe { days -> newState { copy(autoBackupDays = days) } }
+
+        disposables += prefs.backupDirectory.asObservable()
+                .subscribe { directory -> newState { copy(backupDirectory = directory) } }
     }
 
     override fun bindIntents(view: BackupView) {
@@ -129,6 +147,37 @@ class BackupPresenter @Inject constructor(
                         !permissionManager.hasStorage() -> view.requestStoragePermission()
                         upgraded -> performBackup.execute(Unit)
                     }
+                }
+
+        view.autoBackupClicks()
+                .autoDisposable(view.scope())
+                .subscribe { view.showAutoBackupDialog(prefs.autoBackup.get()) }
+
+        view.autoBackupChanged()
+                .autoDisposable(view.scope())
+                .subscribe { days ->
+                    when {
+                        days > 0 && !permissionManager.hasStorage() -> view.requestStoragePermission()
+                        days > 0 -> {
+                            prefs.autoBackup.set(days)
+                            AutoBackupService.scheduleJob(context, days)
+                        }
+                        else -> {
+                            prefs.autoBackup.set(0)
+                            AutoBackupService.cancelJob(context)
+                        }
+                    }
+                }
+
+        view.backupLocationClicks()
+                .autoDisposable(view.scope())
+                .subscribe { view.selectBackupLocation() }
+
+        view.backupLocationChanged()
+                .autoDisposable(view.scope())
+                .subscribe { directory ->
+                    prefs.backupDirectory.set(directory)
+                    storagePermissionSubject.onNext(permissionManager.hasStorage())
                 }
     }
 

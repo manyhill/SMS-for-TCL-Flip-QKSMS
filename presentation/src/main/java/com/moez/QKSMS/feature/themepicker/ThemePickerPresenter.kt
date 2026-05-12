@@ -52,13 +52,15 @@ class ThemePickerPresenter @Inject constructor(
 
         // Update the theme when a material theme is clicked
         view.themeSelected()
-                .autoDisposable(view.scope())
-                .subscribe { color ->
-                    theme.set(color)
-                    if (recipientId == 0L) {
-                        widgetManager.updateTheme()
-                    }
+            .autoDisposable(view.scope())
+            .subscribe({ color ->
+                theme.set(color)
+                if (recipientId == 0L) {
+                    widgetManager.updateTheme()
                 }
+            }, { throwable ->
+                throwable.printStackTrace()
+            })
 
         // Update the color of the apply button
         view.hsvThemeSelected()
@@ -75,19 +77,21 @@ class ThemePickerPresenter @Inject constructor(
 
         // Update the theme, when apply is clicked
         view.applyHsvThemeClicks()
-                .withLatestFrom(view.hsvThemeSelected()) { _, color -> color }
-                .withLatestFrom(billingManager.upgradeStatus) { color, upgraded ->
-                    if (!upgraded) {
-                        view.showQksmsPlusSnackbar()
-                    } else {
-                        theme.set(color)
-                        if (recipientId == 0L) {
-                            widgetManager.updateTheme()
-                        }
+            .withLatestFrom(view.hsvThemeSelected()) { _, color -> color }
+            .withLatestFrom(billingManager.upgradeStatus) { color, upgraded ->
+                if (!upgraded) {
+                    view.showQksmsPlusSnackbar()
+                } else {
+                    theme.set(color)
+                    if (recipientId == 0L) {
+                        widgetManager.updateTheme()
                     }
                 }
-                .autoDisposable(view.scope())
-                .subscribe()
+            }
+            .autoDisposable(view.scope())
+            .subscribe({}, { throwable ->
+                throwable.printStackTrace()
+            })
 
         // Show QKSMS+ activity
         view.viewQksmsPlusClicks()

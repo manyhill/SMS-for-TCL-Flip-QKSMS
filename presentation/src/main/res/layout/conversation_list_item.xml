@@ -23,17 +23,20 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/selectableItemBackground"
+    android:descendantFocusability="blocksDescendants"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingStart="4dp"
-    android:paddingTop="5dp"
-    android:paddingEnd="8dp"
-    android:paddingBottom="5dp">
+    android:paddingStart="12dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="8dp">
 
     <com.moez.QKSMS.common.widget.GroupAvatarView
         android:id="@+id/avatars"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:layout_gravity="top"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -63,41 +66,56 @@
         style="@style/TextSecondary"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
+        android:layout_marginTop="3dp"
         android:ellipsize="end"
         android:maxLines="1"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toStartOf="@id/pinned"
+        app:layout_constraintEnd_toStartOf="@id/statusIcons"
         app:layout_constraintStart_toStartOf="@id/title"
         app:layout_constraintTop_toBottomOf="@id/title"
         tools:text="@tools:sample/lorem/random" />
 
-    <ImageView
-        android:id="@+id/pinned"
-        android:layout_width="20dp"
-        android:layout_height="16dp"
-        android:layout_marginTop="2dp"
-        android:paddingStart="4dp"
-        android:src="@drawable/ic_baseline_push_pin_24"
-        android:tint="?android:attr/textColorTertiary"
-        android:visibility="gone"
-        app:layout_constraintEnd_toStartOf="@id/unread"
-        app:layout_constraintTop_toTopOf="@id/snippet"
-        tools:visibility="visible" />
-
-    <ImageView
-        android:id="@+id/unread"
-        android:layout_width="20dp"
-        android:layout_height="16sp"
-        android:paddingStart="8dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
-        android:src="@drawable/circle"
-        android:visibility="gone"
+    <LinearLayout
+        android:id="@+id/statusIcons"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintBottom_toBottomOf="@id/snippet"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="@id/snippet"
-        tools:tint="@color/tools_theme"
-        tools:visibility="visible" />
+        app:layout_constraintTop_toTopOf="@id/snippet">
+
+        <ImageView
+            android:id="@+id/muted"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_notifications_off_24dp"
+            android:tint="?android:attr/textColorTertiary"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+        <ImageView
+            android:id="@+id/pinned"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="4dp"
+            android:src="@drawable/ic_baseline_push_pin_24"
+            android:tint="?android:attr/textColorTertiary"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+
+        <ImageView
+            android:id="@+id/unread"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="6dp"
+            android:src="@drawable/circle"
+            android:visibility="gone"
+            tools:tint="@color/tools_theme"
+            tools:visibility="visible" />
+    </LinearLayout>
 
     <com.moez.QKSMS.common.widget.QkTextView
         android:id="@+id/date"

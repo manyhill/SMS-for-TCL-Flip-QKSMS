@@ -134,6 +134,22 @@
                 app:summary="@string/backup_restore_summary"
                 app:title="@string/backup_restore_title" />
 
+            <com.moez.QKSMS.common.widget.PreferenceView
+                android:id="@+id/autoBackup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:icon="@drawable/ic_history_black_24dp"
+                app:title="@string/backup_auto_title"
+                tools:summary="@string/backup_auto_never" />
+
+            <com.moez.QKSMS.common.widget.PreferenceView
+                android:id="@+id/backupLocation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:icon="@drawable/ic_file_download_black_24dp"
+                app:title="@string/backup_location_title"
+                tools:summary="/QKSMS/Backups" />
+
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"

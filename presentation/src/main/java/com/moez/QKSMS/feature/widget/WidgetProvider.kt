@@ -44,11 +44,15 @@ class WidgetProvider : AppWidgetProvider() {
     @Inject lateinit var colors: Colors
     @Inject lateinit var prefs: Preferences
 
+    private fun getNotifyDatasetChangedAction(context: Context): String {
+        return context.packageName + WidgetManager.ACTION_NOTIFY_DATASET_CHANGED_SUFFIX
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         AndroidInjection.inject(this, context)
 
         when (intent.action) {
-            WidgetManager.ACTION_NOTIFY_DATASET_CHANGED -> updateData(context)
+            getNotifyDatasetChangedAction(context) -> updateData(context)
             else -> super.onReceive(context, intent)
         }
     }

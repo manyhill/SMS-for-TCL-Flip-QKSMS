@@ -38,7 +38,9 @@ import com.moez.QKSMS.repository.ConversationRepository
 import com.moez.QKSMS.repository.MessageRepository
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
+import io.reactivex.Completable
 import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.schedulers.Schedulers
 import io.reactivex.rxkotlin.Observables
 import io.reactivex.rxkotlin.plusAssign
 import io.reactivex.rxkotlin.withLatestFrom
@@ -144,10 +146,17 @@ class ConversationInfoPresenter @Inject constructor(
         // Set the conversation title
         view.nameChanges()
                 .withLatestFrom(conversation) { name, conversation ->
-                    conversationRepo.setConversationName(conversation.id, name)
+                    conversation.id to name
+                }
+                .switchMapCompletable { (conversationId, name) ->
+                    Completable.fromAction {
+                        conversationRepo.setConversationName(conversationId, name)
+                    }
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
                 }
                 .autoDisposable(view.scope())
-                .subscribe()
+                .subscribe({}, { context.makeToast(R.string.qksms_plus_error) })
 
         // Show the notifications settings for the conversation
         view.notificationClicks()

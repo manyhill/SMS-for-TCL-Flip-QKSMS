@@ -20,13 +20,11 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-    compileSdkVersion 25
+    compileSdkVersion 29
 
     defaultConfig {
-        minSdkVersion 21
+         minSdkVersion 23
         targetSdkVersion 25
-        versionCode 1
-        versionName "1.0"
     }
 
     lintOptions {
@@ -44,6 +42,3 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 }
 
-repositories {
-    mavenCentral()
-}

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.moez.QKSMS">
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CALL_PHONE" /> <!-- Used for starting foreground service for backup/restore on Android P+ -->
@@ -12,6 +13,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.RECEIVE_MMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -38,7 +40,19 @@
         <activity
             android:name=".feature.compose.DateTimePickerActivity"
             android:exported="false" />
+        <activity-alias
+            android:name="com.android.mms.ui.ConversationList"
+            android:targetActivity=".feature.main.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+
+            
+
+
+
+        </activity-alias>
         <activity
+
             android:name=".feature.main.MainActivity"
             android:launchMode="singleTask">
             <intent-filter>
@@ -151,10 +165,10 @@
         <receiver android:name=".receiver.SmsDeliveredReceiver" />
         <receiver
             android:name=".receiver.MmsSentReceiver"
-            android:taskAffinity="com.moez.QKSMS.MMS_SENT" />
+            android:taskAffinity="${applicationId}.MMS_SENT" />
         <receiver
             android:name=".receiver.MmsUpdatedReceiver"
-            android:taskAffinity="com.moez.QKSMS.MMS_UPDATED" />
+            android:taskAffinity="${applicationId}.MMS_UPDATED" />
         <receiver
             android:name=".receiver.MmsReceivedReceiver"
             android:taskAffinity="com.klinker.android.messaging.MMS_RECEIVED" />
@@ -173,7 +187,7 @@
         <receiver android:name=".feature.widget.WidgetProvider">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.moez.QKSMS.intent.action.ACTION_NOTIFY_DATASET_CHANGED" />
+                <action android:name="${widgetNotifyAction}" />
             </intent-filter>
 
             <meta-data
@@ -187,6 +201,9 @@
         <service
             android:name=".feature.widget.WidgetService"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
+        <service
+            android:name=".service.AutoBackupService"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service
             android:name=".service.AutoDeleteService"
             android:permission="android.permission.BIND_JOB_SERVICE" />

@@ -34,9 +34,10 @@ interface ContactsContract : QkView<ContactsState> {
     val composeItemLongPressedIntent: Subject<ComposeItem>
     val phoneNumberSelectedIntent: Subject<Optional<Long>>
     val phoneNumberActionIntent: Subject<PhoneNumberAction>
+    val doneIntent: Observable<*>
 
     fun clearQuery()
-    fun openKeyboard()
+    fun focusContacts()
     fun finish(result: HashMap<String, String?>)
 
 }

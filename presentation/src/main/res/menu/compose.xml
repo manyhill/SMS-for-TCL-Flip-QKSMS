@@ -116,5 +116,10 @@
         android:visible="false"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/mute"
+        android:title="@string/compose_menu_mute"
+        android:visible="false"
+        app:showAsAction="never" />
 
 </menu>

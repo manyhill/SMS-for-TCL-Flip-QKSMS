@@ -20,9 +20,16 @@ package com.moez.QKSMS.feature.backup
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.os.Environment
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.NumberPicker
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.view.children
@@ -49,6 +56,10 @@ import javax.inject.Inject
 
 class BackupController : QkController<BackupView, BackupState, BackupPresenter>(), BackupView {
 
+    companion object {
+        private const val BackupLocationRequestCode = 4901
+    }
+
     @Inject lateinit var adapter: BackupAdapter
     @Inject lateinit var dateFormatter: DateFormatter
     @Inject override lateinit var presenter: BackupPresenter
@@ -56,6 +67,12 @@ class BackupController : QkController<BackupView, BackupState, BackupPresenter>(
     private val activityVisibleSubject: Subject<Unit> = PublishSubject.create()
     private val confirmRestoreSubject: Subject<Unit> = PublishSubject.create()
     private val stopRestoreSubject: Subject<Unit> = PublishSubject.create()
+    private val autoBackupSubject: Subject<Int> = PublishSubject.create()
+    private val backupLocationSubject: Subject<String> = PublishSubject.create()
+    private var lastFocusedBackupViewId: Int = View.NO_ID
+
+    private val defaultBackupDirectory: String
+        get() = Environment.getExternalStorageDirectory().toString() + activity!!.getString(R.string.backup_location_default)
 
     private val backupFilesDialog by lazy {
         val view = View.inflate(activity, R.layout.backup_list_dialog, null)
@@ -65,6 +82,7 @@ class BackupController : QkController<BackupView, BackupState, BackupPresenter>(
                 .setView(view)
                 .setCancelable(true)
                 .create()
+                .apply { setOnDismissListener { restoreBackupFocus() } }
     }
 
     private val confirmRestoreDialog by lazy {
@@ -74,6 +92,7 @@ class BackupController : QkController<BackupView, BackupState, BackupPresenter>(
                 .setPositiveButton(R.string.backup_restore_title, confirmRestoreSubject)
                 .setNegativeButton(R.string.button_cancel, null)
                 .create()
+                .apply { setOnDismissListener { restoreBackupFocus() } }
     }
 
     private val stopRestoreDialog by lazy {
@@ -83,6 +102,7 @@ class BackupController : QkController<BackupView, BackupState, BackupPresenter>(
                 .setPositiveButton(R.string.button_stop, stopRestoreSubject)
                 .setNegativeButton(R.string.button_cancel, null)
                 .create()
+                .apply { setOnDismissListener { restoreBackupFocus() } }
     }
 
     init {
@@ -159,6 +179,15 @@ class BackupController : QkController<BackupView, BackupState, BackupPresenter>(
         }
 
         backup.summary = state.lastBackup
+        autoBackup.summary = when (state.autoBackupDays) {
+            0 -> activity!!.getString(R.string.backup_auto_never)
+            else -> activity!!.getString(R.string.backup_auto_summary, state.autoBackupDays)
+        }
+        backupLocation.summary = when {
+            state.backupDirectory.isBlank() -> defaultBackupDirectory
+            state.backupDirectory.startsWith("content://") -> activity!!.getString(R.string.backup_location_selected)
+            else -> state.backupDirectory
+        }
 
         adapter.data = state.backups
 
@@ -188,14 +217,135 @@ class BackupController : QkController<BackupView, BackupState, BackupPresenter>(
 
     override fun fabClicks(): Observable<*> = fab.clicks()
 
+    override fun autoBackupClicks(): Observable<*> = autoBackup.clicks()
+
+    override fun autoBackupChanged(): Observable<Int> = autoBackupSubject
+
+    override fun backupLocationClicks(): Observable<*> = backupLocation.clicks()
+
+    override fun backupLocationChanged(): Observable<String> = backupLocationSubject
+
     override fun requestStoragePermission() {
         ActivityCompat.requestPermissions(activity!!, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 0)
     }
 
-    override fun selectFile() = backupFilesDialog.show()
+    override fun selectFile() {
+        rememberBackupFocus(restore)
+        backupFilesDialog.show()
+    }
 
-    override fun confirmRestore() = confirmRestoreDialog.show()
+    override fun confirmRestore() {
+        rememberBackupFocus()
+        confirmRestoreDialog.show()
+    }
 
-    override fun stopRestore() = stopRestoreDialog.show()
+    override fun stopRestore() {
+        rememberBackupFocus(progressCancel)
+        stopRestoreDialog.show()
+    }
+
+    override fun showAutoBackupDialog(days: Int) {
+        rememberBackupFocus(autoBackup)
+        val picker = NumberPicker(activity).apply {
+            minValue = 0
+            maxValue = 30
+            value = days.coerceIn(minValue, maxValue)
+            displayedValues = Array(maxValue - minValue + 1) { index ->
+                when (index) {
+                    0 -> activity!!.getString(R.string.backup_auto_never)
+                    else -> index.toString()
+                }
+            }
+            wrapSelectorWheel = false
+        }
+
+        val label = TextView(activity).apply {
+            text = activity!!.getString(R.string.backup_auto_picker_days)
+            gravity = android.view.Gravity.CENTER
+        }
+
+        val layout = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 8, 48, 0)
+            addView(picker)
+            addView(label)
+        }
+
+        AlertDialog.Builder(activity!!)
+            .setTitle(R.string.backup_auto_dialog_title)
+            .setMessage(R.string.backup_auto_dialog_message)
+            .setView(layout)
+            .setPositiveButton(R.string.button_set) { _, _ ->
+                autoBackupSubject.onNext(picker.value)
+            }
+            .setNegativeButton(R.string.backup_auto_never) { _, _ ->
+                autoBackupSubject.onNext(0)
+            }
+            .show()
+            .setOnDismissListener { restoreBackupFocus() }
+    }
+
+    override fun selectBackupLocation() {
+        rememberBackupFocus(backupLocation)
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+
+        val currentActivity = activity ?: return
+        if (intent.resolveActivity(currentActivity.packageManager) == null) {
+            Toast.makeText(currentActivity, R.string.backup_location_picker_unavailable, Toast.LENGTH_LONG).show()
+            restoreBackupFocus()
+            return
+        }
+
+        try {
+            startActivityForResult(intent, BackupLocationRequestCode)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(currentActivity, R.string.backup_location_picker_unavailable, Toast.LENGTH_LONG).show()
+            restoreBackupFocus()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == BackupLocationRequestCode && resultCode == Activity.RESULT_OK) {
+            val uri = data?.data ?: return
+            val flags = data.flags and (
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+
+            try {
+                activity?.contentResolver?.takePersistableUriPermission(uri, flags)
+            } catch (e: SecurityException) {
+                Toast.makeText(activity, R.string.backup_location_permission_failed, Toast.LENGTH_LONG).show()
+                restoreBackupFocus()
+                return
+            }
+            backupLocationSubject.onNext(uri.toString())
+            backupLocation.post { restoreBackupFocus() }
+        }
+    }
+
+    private fun rememberBackupFocus(fallback: View? = null) {
+        val focusedView = activity?.currentFocus
+        lastFocusedBackupViewId = fallback
+            ?.id
+            ?.takeIf { it != View.NO_ID }
+            ?: focusedView?.id?.takeIf { it != View.NO_ID }
+            ?: View.NO_ID
+    }
+
+    private fun restoreBackupFocus() {
+        val viewId = lastFocusedBackupViewId.takeIf { it != View.NO_ID } ?: return
+        containerView?.post {
+            containerView?.findViewById<View>(viewId)
+                ?.takeIf { it.isShown && !it.isFocused }
+                ?.requestFocus()
+        }
+    }
 
 }

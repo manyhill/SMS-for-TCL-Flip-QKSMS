@@ -20,6 +20,7 @@ package com.moez.QKSMS.feature.compose.editing
 
 import android.content.Context
 import android.os.Build
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.RelativeLayout
@@ -54,6 +55,18 @@ class ChipsAdapter @Inject constructor() : QkAdapter<Recipient>() {
             view.setOnClickListener {
                 val chip = getItem(adapterPosition)
                 showDetailedChip(view.context, chip)
+            }
+            view.setOnKeyListener { _, keyCode, event ->
+                if (event.action == KeyEvent.ACTION_UP &&
+                    (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_DEL)
+                ) {
+                    val position = adapterPosition.takeIf { it != RecyclerView.NO_POSITION }
+                        ?: return@setOnKeyListener true
+                    chipDeleted.onNext(getItem(position))
+                    true
+                } else {
+                    false
+                }
             }
         }
     }

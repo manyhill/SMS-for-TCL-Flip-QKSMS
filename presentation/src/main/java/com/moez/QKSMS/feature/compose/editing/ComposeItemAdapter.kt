@@ -34,6 +34,7 @@ import com.moez.QKSMS.model.ContactGroup
 import com.moez.QKSMS.model.Conversation
 import com.moez.QKSMS.model.Recipient
 import com.moez.QKSMS.repository.ConversationRepository
+import com.moez.QKSMS.util.PhoneNumberUtils
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.rxkotlin.plusAssign
 import io.reactivex.subjects.PublishSubject
@@ -44,7 +45,8 @@ import javax.inject.Inject
 
 class ComposeItemAdapter @Inject constructor(
     private val colors: Colors,
-    private val conversationRepo: ConversationRepository
+    private val conversationRepo: ConversationRepository,
+    private val phoneNumberUtils: PhoneNumberUtils
 ) : QkAdapter<ComposeItem>() {
 
     val clicks: Subject<ComposeItem> = PublishSubject.create()
@@ -54,6 +56,12 @@ class ComposeItemAdapter @Inject constructor(
     private val disposables = CompositeDisposable()
 
     var recipients: Map<String, Recipient> = mapOf()
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
+
+    var selectedChips: Map<String, String?> = mapOf()
         set(value) {
             field = value
             notifyDataSetChanged()
@@ -107,6 +115,7 @@ class ComposeItemAdapter @Inject constructor(
         holder.subtitle.isVisible = false
 
         holder.numbers.isVisible = false
+        bindSelection(holder, ComposeItem.New(contact))
     }
 
     private fun bindRecent(holder: QkViewHolder, conversation: Conversation, prev: ComposeItem?) {
@@ -129,6 +138,7 @@ class ComposeItemAdapter @Inject constructor(
         (holder.numbers.adapter as PhoneNumberAdapter).data = conversation.recipients
                 .mapNotNull { recipient -> recipient.contact }
                 .flatMap { contact -> contact.numbers }
+        bindSelection(holder, ComposeItem.Recent(conversation))
     }
 
     private fun bindStarred(holder: QkViewHolder, contact: Contact, prev: ComposeItem?) {
@@ -145,6 +155,7 @@ class ComposeItemAdapter @Inject constructor(
 
         holder.numbers.isVisible = true
         (holder.numbers.adapter as PhoneNumberAdapter).data = contact.numbers
+        bindSelection(holder, ComposeItem.Starred(contact))
     }
 
     private fun bindGroup(holder: QkViewHolder, group: ContactGroup, prev: ComposeItem?) {
@@ -162,14 +173,11 @@ class ComposeItemAdapter @Inject constructor(
         holder.subtitle.collapseEnabled = group.contacts.size > 1
 
         holder.numbers.isVisible = false
+        bindSelection(holder, ComposeItem.Group(group))
     }
 
     private fun bindPerson(holder: QkViewHolder, contact: Contact, prev: ComposeItem?) {
-        holder.index.isVisible = true
-        holder.index.text = if (contact.name.getOrNull(0)?.isLetter() == true) contact.name[0].toString() else "#"
-        holder.index.isVisible = prev !is ComposeItem.Person ||
-                (contact.name[0].isLetter() && !contact.name[0].equals(prev.value.name[0], ignoreCase = true)) ||
-                (!contact.name[0].isLetter() && prev.value.name[0].isLetter())
+        holder.index.isVisible = false
 
         holder.icon.isVisible = false
 
@@ -181,6 +189,18 @@ class ComposeItemAdapter @Inject constructor(
 
         holder.numbers.isVisible = true
         (holder.numbers.adapter as PhoneNumberAdapter).data = contact.numbers
+        bindSelection(holder, ComposeItem.Person(contact))
+    }
+
+    private fun bindSelection(holder: QkViewHolder, item: ComposeItem) {
+        val contacts = item.getContacts()
+        val isSelected = contacts.isNotEmpty() && contacts.all { contact ->
+            contact.numbers.any { number ->
+                selectedChips.keys.any { selected -> phoneNumberUtils.compare(selected, number.address) }
+            }
+        }
+        holder.containerView.isActivated = isSelected
+        holder.check.isVisible = isSelected
     }
 
     private fun createRecipient(contact: Contact): Recipient {

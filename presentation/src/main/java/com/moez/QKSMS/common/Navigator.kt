@@ -47,6 +47,7 @@ import com.moez.QKSMS.manager.AnalyticsManager
 import com.moez.QKSMS.manager.BillingManager
 import com.moez.QKSMS.manager.NotificationManager
 import com.moez.QKSMS.manager.PermissionManager
+import com.moez.QKSMS.model.Attachment
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -103,6 +104,25 @@ class Navigator @Inject constructor(
         intent.putExtra(Intent.EXTRA_TEXT, body)
         images?.takeIf { it.isNotEmpty() }?.let {
             intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(images))
+        }
+
+        startActivity(intent)
+    }
+
+    fun showForward(body: String? = null, attachments: List<Attachment>? = null) {
+        val intent = Intent(context, ComposeActivity::class.java)
+        intent.putExtra(Intent.EXTRA_TEXT, body)
+        intent.putExtra("forward_mode", true)
+        val uris = attachments.orEmpty().mapNotNull { attachment ->
+            when (attachment) {
+                is Attachment.Image -> attachment.getUri()
+                is Attachment.Video -> attachment.getUri()
+                is Attachment.File -> attachment.getUri()
+                is Attachment.Contact -> null
+            }
+        }
+        uris.takeIf { it.isNotEmpty() }?.let {
+            intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(it))
         }
 
         startActivity(intent)

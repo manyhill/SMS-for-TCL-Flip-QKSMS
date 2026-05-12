@@ -24,11 +24,15 @@ apply plugin: 'kotlin-kapt'
 
 android {
     compileSdkVersion 29
-    flavorDimensions "analytics"
+    flavorDimensions "appId", "analytics"
+
+    buildFeatures {
+        viewBinding true
+    }
 
     defaultConfig {
-        applicationId "com.moez.QKSMS"
-        minSdkVersion 21
+        applicationId "com.android.mms"
+         minSdkVersion 23
         targetSdkVersion 29
         versionCode 2218
         versionName "3.9.4"
@@ -46,8 +50,9 @@ android {
         release {
             minifyEnabled true
             shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+
         }
     }
 
@@ -63,11 +68,40 @@ android {
     lintOptions {
         abortOnError false
     }
-
     productFlavors {
-        withAnalytics { dimension "analytics" }
-        noAnalytics { dimension "analytics" }
+        qksms {
+            dimension "appId"
+            applicationId "com.moez.qksms"
+            manifestPlaceholders = [
+                widgetNotifyAction: "${applicationId}.intent.action.ACTION_NOTIFY_DATASET_CHANGED"
+            ]
+        }
+
+        stockMms {
+            dimension "appId"
+            applicationId "com.android.mms"
+            manifestPlaceholders = [
+                widgetNotifyAction: "${applicationId}.intent.action.ACTION_NOTIFY_DATASET_CHANGED"
+            ]
+        }
+
+        ctsMms {
+            dimension "appId"
+            applicationId "com.android.cts.mms"
+            manifestPlaceholders = [
+                widgetNotifyAction: "${applicationId}.intent.action.ACTION_NOTIFY_DATASET_CHANGED"
+            ]
+        }
+
+        noAnalytics {
+            dimension "analytics"
+        }
+
+        withAnalytics {
+            dimension "analytics"
+        }
     }
+
 
     if (System.getenv("CI") == "true") {
         signingConfigs.release.storeFile = file("../keystore")
@@ -141,7 +175,6 @@ dependencies {
     })
 
     // realm
-    implementation("io.realm:android-adapters:$realm_adapters_version") { transitive = false }
     kapt "io.realm:realm-annotations:$realm_version"
     kapt "io.realm:realm-annotations-processor:$realm_version"
 
@@ -175,7 +208,7 @@ dependencies {
 
     implementation "com.github.chrisbanes:PhotoView:2.0.0"
     implementation "com.f2prateek.rx.preferences2:rx-preferences:$rx_preferences_version"
-    implementation "com.google.android:flexbox:0.3.1"
+    implementation "com.google.android.flexbox:flexbox:3.0.0"
     implementation "com.jakewharton.timber:timber:$timber_version"
     implementation "com.squareup.moshi:moshi-kotlin:$moshi_version"
     implementation "me.leolin:ShortcutBadger:1.1.22"

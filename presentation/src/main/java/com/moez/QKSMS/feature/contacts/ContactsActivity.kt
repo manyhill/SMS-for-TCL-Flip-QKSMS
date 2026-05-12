@@ -22,6 +22,8 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
+import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.lifecycle.ViewModelProviders
 import com.jakewharton.rxbinding2.view.clicks
@@ -33,7 +35,6 @@ import com.moez.QKSMS.common.base.QkThemedActivity
 import com.moez.QKSMS.common.util.extensions.hideKeyboard
 import com.moez.QKSMS.common.util.extensions.resolveThemeColor
 import com.moez.QKSMS.common.util.extensions.setBackgroundTint
-import com.moez.QKSMS.common.util.extensions.showKeyboard
 import com.moez.QKSMS.common.widget.QkDialog
 import com.moez.QKSMS.extensions.Optional
 import com.moez.QKSMS.feature.compose.editing.ComposeItem
@@ -52,6 +53,7 @@ class ContactsActivity : QkThemedActivity(), ContactsContract {
     companion object {
         const val SharingKey = "sharing"
         const val ChipsKey = "chips"
+        const val SingleRecipientKey = "single_recipient"
     }
 
     @Inject lateinit var contactsAdapter: ComposeItemAdapter
@@ -65,8 +67,10 @@ class ContactsActivity : QkThemedActivity(), ContactsContract {
     override val composeItemLongPressedIntent: Subject<ComposeItem> by lazy { contactsAdapter.longClicks }
     override val phoneNumberSelectedIntent: Subject<Optional<Long>> by lazy { phoneNumberAdapter.selectedItemChanges }
     override val phoneNumberActionIntent: Subject<PhoneNumberAction> = PublishSubject.create()
+    override val doneIntent: Observable<*> by lazy { done.clicks() }
 
     private val viewModel by lazy { ViewModelProviders.of(this, viewModelFactory)[ContactsViewModel::class.java] }
+    private var lastSelectedCount = -1
 
     private val phoneNumberDialog by lazy {
         QkDialog(this).apply {
@@ -88,6 +92,9 @@ class ContactsActivity : QkThemedActivity(), ContactsContract {
         viewModel.bindView(this)
 
         contacts.adapter = contactsAdapter
+        contacts.itemAnimator = null
+        contacts.isFocusable = true
+        contacts.isFocusableInTouchMode = true
 
         // These theme attributes don't apply themselves on API 21
         if (Build.VERSION.SDK_INT <= 22) {
@@ -99,6 +106,25 @@ class ContactsActivity : QkThemedActivity(), ContactsContract {
         cancel.isVisible = state.query.length > 1
 
         contactsAdapter.data = state.composeItems
+        contactsAdapter.selectedChips = state.selectedChips
+        val selectedCount = state.selectedChips.size
+        if (lastSelectedCount != -1 && lastSelectedCount != selectedCount) {
+            Toast.makeText(
+                this,
+                resources.getQuantityString(
+                    R.plurals.contacts_selected_toast,
+                    selectedCount,
+                    selectedCount
+                ),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        lastSelectedCount = selectedCount
+        contacts.post {
+            if (currentFocus == null) {
+                contacts.requestFocus()
+            }
+        }
 
         if (state.selectedContact != null && !phoneNumberDialog.isShowing) {
             phoneNumberAdapter.data = state.selectedContact.numbers
@@ -107,16 +133,21 @@ class ContactsActivity : QkThemedActivity(), ContactsContract {
         } else if (state.selectedContact == null && phoneNumberDialog.isShowing) {
             phoneNumberDialog.dismiss()
         }
+
+        done.isEnabled = state.selectedChips.isNotEmpty()
+        done.alpha = if (state.selectedChips.isNotEmpty()) 1f else 0.5f
     }
 
     override fun clearQuery() {
         search.text = null
     }
 
-    override fun openKeyboard() {
-        search.postDelayed({
-            search.showKeyboard()
-        }, 200)
+    override fun focusContacts() {
+        contacts.post {
+            if (!contacts.isFocused) {
+                contacts.requestFocus()
+            }
+        }
     }
 
     override fun finish(result: HashMap<String, String?>) {
@@ -124,6 +155,35 @@ class ContactsActivity : QkThemedActivity(), ContactsContract {
         val intent = Intent().putExtra(ChipsKey, result)
         setResult(Activity.RESULT_OK, intent)
         finish()
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_SOFT_RIGHT -> {
+                if (done.isEnabled) {
+                    done.performClick()
+                }
+                true
+            }
+            else -> super.onKeyUp(keyCode, event)
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                if (contacts.isFocused) {
+                    contacts.getChildAt(0)?.let { firstRow ->
+                        firstRow.requestFocus()
+                        return true
+                    }
+                }
+
+                super.onKeyDown(keyCode, event)
+            }
+
+            else -> super.onKeyDown(keyCode, event)
+        }
     }
 
 }

@@ -30,6 +30,12 @@ interface NotificationManager {
 
     fun buildNotificationChannelId(threadId: Long): String
 
+    fun muteConversation(threadId: Long)
+
+    fun unmuteConversation(threadId: Long)
+
+    fun isConversationMuted(threadId: Long): Boolean
+
     fun getNotificationForBackup(): NotificationCompat.Builder
 
 }

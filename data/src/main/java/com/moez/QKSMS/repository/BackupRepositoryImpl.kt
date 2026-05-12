@@ -19,7 +19,9 @@
 package com.moez.QKSMS.repository
 
 import android.content.Context
+import android.net.Uri
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.Telephony
 import androidx.core.content.contentValuesOf
 import com.moez.QKSMS.model.BackupFile
@@ -53,7 +55,7 @@ class BackupRepositoryImpl @Inject constructor(
 ) : BackupRepository {
 
     companion object {
-        private val BACKUP_DIRECTORY = Environment.getExternalStorageDirectory().toString() + "/QKSMS/Backups"
+        private val DEFAULT_BACKUP_DIRECTORY = Environment.getExternalStorageDirectory().toString() + "/QKSMS/Backups"
     }
 
     data class Backup(
@@ -91,6 +93,11 @@ class BackupRepositoryImpl @Inject constructor(
 
     @Volatile private var stopFlag: Boolean = false
 
+    private fun backupDirectory(): String = prefs.backupDirectory.get().takeIf { it.isNotBlank() }
+            ?: DEFAULT_BACKUP_DIRECTORY
+
+    private fun isTreeBackupDirectory(directory: String): Boolean = directory.startsWith("content://")
+
     override fun performBackup() {
         // If a backup or restore is already running, don't do anything
         if (isBackupOrRestoreRunning()) return
@@ -120,12 +127,30 @@ class BackupRepositoryImpl @Inject constructor(
 
         try {
             // Create the directory and file
-            val dir = File(BACKUP_DIRECTORY).apply { mkdirs() }
             val timestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.getDefault()).format(System.currentTimeMillis())
-            val file = File(dir, "backup-$timestamp.json")
+            val fileName = "backup-$timestamp.json"
+            val directory = backupDirectory()
 
-            // Write the log to the file
-            FileOutputStream(file, true).use { fileOutputStream -> fileOutputStream.write(json) }
+            if (isTreeBackupDirectory(directory)) {
+                val parentUri = Uri.parse(directory)
+                val fileUri = DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parentUri,
+                    "application/json",
+                    fileName
+                )
+
+                fileUri?.let { uri ->
+                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(json)
+                    }
+                } ?: throw IllegalStateException("Unable to create backup file in selected folder")
+            } else {
+                val dir = File(directory).apply { mkdirs() }
+                val file = File(dir, fileName)
+
+                FileOutputStream(file, true).use { fileOutputStream -> fileOutputStream.write(json) }
+            }
         } catch (e: Exception) {
             Timber.w(e)
         }
@@ -151,24 +176,17 @@ class BackupRepositoryImpl @Inject constructor(
 
     override fun getBackupProgress(): Observable<BackupRepository.Progress> = backupProgress
 
-    override fun getBackups(): Observable<List<BackupFile>> = QkFileObserver(BACKUP_DIRECTORY).observable
-            .map { File(BACKUP_DIRECTORY).listFiles() ?: arrayOf() }
-            .subscribeOn(Schedulers.io())
-            .observeOn(Schedulers.computation())
-            .map { files ->
-                files.mapNotNull { file ->
-                    val adapter = moshi.adapter(BackupMetadata::class.java)
-                    val backup = tryOrNull(false) {
-                        file.source().buffer().use(adapter::fromJson)
-                    } ?: return@mapNotNull null
-
-                    val path = file.path
-                    val date = file.lastModified()
-                    val messages = backup.messageCount
-                    val size = file.length()
-                    BackupFile(path, date, messages, size)
+    override fun getBackups(): Observable<List<BackupFile>> = Observable.just(backupDirectory())
+            .switchMap { directory ->
+                when {
+                    isTreeBackupDirectory(directory) -> Observable.just(listTreeBackups(directory))
+                    else -> QkFileObserver(directory).observable
+                        .map { File(directory).listFiles() ?: arrayOf() }
+                        .map { files -> fileBackups(files) }
                 }
             }
+            .subscribeOn(Schedulers.io())
+            .observeOn(Schedulers.computation())
             .map { files -> files.sortedByDescending { file -> file.date } }
 
     override fun performRestore(filePath: String) {
@@ -177,13 +195,20 @@ class BackupRepositoryImpl @Inject constructor(
 
         restoreProgress.onNext(BackupRepository.Progress.Parsing())
 
-        val file = File(filePath)
-        val backup = file.source().buffer().use { source ->
-            moshi.adapter(Backup::class.java).fromJson(source)
+        val backup = when {
+            filePath.startsWith("content://") -> context.contentResolver.openInputStream(Uri.parse(filePath))
+                ?.source()
+                ?.buffer()
+                ?.use { source -> moshi.adapter(Backup::class.java).fromJson(source) }
+
+            else -> File(filePath).source().buffer().use { source ->
+                moshi.adapter(Backup::class.java).fromJson(source)
+            }
         }
 
         val messageCount = backup?.messages?.size ?: 0
         var errorCount = 0
+        var skippedCount = 0
 
         backup?.messages?.forEachIndexed { index, message ->
             if (stopFlag) {
@@ -196,6 +221,11 @@ class BackupRepositoryImpl @Inject constructor(
             restoreProgress.onNext(BackupRepository.Progress.Running(messageCount, index))
 
             try {
+                if (messageAlreadyExists(message)) {
+                    skippedCount++
+                    return@forEachIndexed
+                }
+
                 val values = contentValuesOf(
                         Telephony.Sms.TYPE to message.type,
                         Telephony.Sms.ADDRESS to message.address,
@@ -222,7 +252,11 @@ class BackupRepositoryImpl @Inject constructor(
         }
 
         if (errorCount > 0) {
-            Timber.w(Exception("Failed to backup $errorCount/$messageCount messages"))
+            Timber.w(Exception("Failed to restore $errorCount/$messageCount messages"))
+        }
+
+        if (skippedCount > 0) {
+            Timber.i("Skipped $skippedCount duplicate messages during restore")
         }
 
         // Sync the messages
@@ -242,6 +276,95 @@ class BackupRepositoryImpl @Inject constructor(
 
     private fun isBackupOrRestoreRunning(): Boolean {
         return backupProgress.blockingFirst().running || restoreProgress.blockingFirst().running
+    }
+
+    private fun fileBackups(files: Array<File>): List<BackupFile> {
+        val adapter = moshi.adapter(BackupMetadata::class.java)
+
+        return files.mapNotNull { file ->
+            val backup = tryOrNull(false) {
+                file.source().buffer().use(adapter::fromJson)
+            } ?: return@mapNotNull null
+
+            BackupFile(file.path, file.lastModified(), backup.messageCount, file.length())
+        }
+    }
+
+    private fun listTreeBackups(directory: String): List<BackupFile> {
+        val adapter = moshi.adapter(BackupMetadata::class.java)
+        val treeUri = Uri.parse(directory)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            DocumentsContract.Document.COLUMN_SIZE
+        )
+
+        return context.contentResolver.query(childrenUri, projection, null, null, null)
+            ?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val dateColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                val sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+                val backups = mutableListOf<BackupFile>()
+
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameColumn) ?: continue
+                    if (!name.endsWith(".json")) continue
+
+                    val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                        treeUri,
+                        cursor.getString(idColumn)
+                    )
+                    val backup = tryOrNull(false) {
+                        context.contentResolver.openInputStream(documentUri)
+                            ?.source()
+                            ?.buffer()
+                            ?.use(adapter::fromJson)
+                    } ?: continue
+
+                    backups += BackupFile(
+                        documentUri.toString(),
+                        cursor.getLong(dateColumn),
+                        backup.messageCount,
+                        cursor.getLong(sizeColumn)
+                    )
+                }
+
+                backups
+            } ?: listOf()
+    }
+
+    private fun messageAlreadyExists(message: BackupMessage): Boolean {
+        val selection = StringBuilder()
+            .append("${Telephony.Sms.ADDRESS} = ?")
+            .append(" AND ${Telephony.Sms.DATE} = ?")
+            .append(" AND ${Telephony.Sms.TYPE} = ?")
+            .append(" AND ${Telephony.Sms.BODY} = ?")
+
+        val selectionArgs = mutableListOf(
+            message.address,
+            message.date.toString(),
+            message.type.toString(),
+            message.body
+        )
+
+        if (prefs.canUseSubId.get()) {
+            selection.append(" AND ${Telephony.Sms.SUBSCRIPTION_ID} = ?")
+            selectionArgs += message.subId.toString()
+        }
+
+        return context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms._ID),
+            selection.toString(),
+            selectionArgs.toTypedArray(),
+            null
+        )?.use { cursor -> cursor.moveToFirst() } ?: false
     }
 
 }

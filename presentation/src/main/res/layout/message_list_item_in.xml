@@ -76,6 +76,7 @@
         android:nestedScrollingEnabled="false"
         android:orientation="vertical"
         android:focusable="true"
+        android:clickable="true"
         android:focusableInTouchMode="true"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
         app:layout_constrainedWidth="true"
@@ -93,6 +94,24 @@
         app:layout_constraintBottom_toTopOf="@+id/attachments"
         app:layout_constraintStart_toStartOf="parent" />
 
+    <com.moez.QKSMS.common.widget.QkTextView
+        android:id="@+id/senderName"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:ellipsize="end"
+        android:includeFontPadding="false"
+        android:maxWidth="96dp"
+        android:singleLine="true"
+        android:textColor="?android:attr/textColorTertiary"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/avatar"
+        app:layout_constraintStart_toEndOf="@id/avatar"
+        app:layout_constraintTop_toTopOf="@id/avatar"
+        app:textSize="tertiary"
+        tools:text="Moez"
+        tools:visibility="visible" />
+
     <com.moez.QKSMS.common.widget.TightTextView
         android:id="@+id/body"
         style="@style/TextPrimary"
@@ -105,6 +124,7 @@
         android:gravity="start|center_vertical"
         android:minHeight="25dp"
         android:focusable="true"
+        android:clickable="true"
         android:focusableInTouchMode="true"
         app:layout_constrainedWidth="true"
         app:layout_constraintEnd_toEndOf="parent"

@@ -23,13 +23,21 @@ import com.moez.QKSMS.injection.ViewModelKey
 import dagger.Module
 import dagger.Provides
 import dagger.multibindings.IntoMap
+import javax.inject.Named
 
 @Module
 class ContactsActivityModule {
 
     @Provides
+    @Named("sharing")
     fun provideIsSharing(activity: ContactsActivity): Boolean {
         return activity.intent.extras?.getBoolean(ContactsActivity.SharingKey, false) ?: false
+    }
+
+    @Provides
+    @Named("singleRecipient")
+    fun provideSingleRecipient(activity: ContactsActivity): Boolean {
+        return activity.intent.extras?.getBoolean(ContactsActivity.SingleRecipientKey, false) ?: false
     }
 
     @Provides

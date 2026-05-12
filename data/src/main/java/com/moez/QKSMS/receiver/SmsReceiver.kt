@@ -35,11 +35,17 @@ class SmsReceiver : BroadcastReceiver() {
         AndroidInjection.inject(this, context)
         Timber.v("onReceive")
 
-        Sms.Intents.getMessagesFromIntent(intent)?.let { messages ->
-            val subId = intent.extras?.getInt("subscription", -1) ?: -1
+        val messages = Sms.Intents.getMessagesFromIntent(intent) ?: return
+        val subId = intent.extras?.getInt("subscription", -1) ?: -1
+        val pendingResult = goAsync()
 
-            val pendingResult = goAsync()
-            receiveMessage.execute(ReceiveSms.Params(subId, messages)) { pendingResult.finish() }
+        try {
+            receiveMessage.execute(ReceiveSms.Params(subId, messages)) {
+                pendingResult.finish()
+            }
+        } catch (t: Throwable) {
+            Timber.e(t, "SmsReceiver failed")
+            pendingResult.finish()
         }
     }
 

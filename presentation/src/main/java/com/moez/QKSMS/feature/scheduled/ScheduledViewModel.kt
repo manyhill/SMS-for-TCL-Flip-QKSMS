@@ -29,8 +29,11 @@ import com.moez.QKSMS.manager.BillingManager
 import com.moez.QKSMS.repository.ScheduledMessageRepository
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
+import io.reactivex.Completable
+import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.plusAssign
 import io.reactivex.rxkotlin.withLatestFrom
+import io.reactivex.schedulers.Schedulers
 import javax.inject.Inject
 
 class ScheduledViewModel @Inject constructor(
@@ -57,15 +60,23 @@ class ScheduledViewModel @Inject constructor(
 
         view.messageMenuIntent
                 .withLatestFrom(view.messageClickIntent) { itemId, messageId ->
+                    itemId to messageId
+                }
+                .switchMapCompletable { (itemId, messageId) ->
                     when (itemId) {
-                        0 -> sendScheduledMessage.execute(messageId)
-                        1 -> scheduledMessageRepo.getScheduledMessage(messageId)?.let { message ->
-                            ClipboardUtils.copy(context, message.body)
-                            context.makeToast(R.string.toast_copied)
+                        0 -> Completable.fromAction { sendScheduledMessage.execute(messageId) }
+                        1 -> Completable.fromAction {
+                            scheduledMessageRepo.getScheduledMessage(messageId)?.let { message ->
+                                ClipboardUtils.copy(context, message.body)
+                                context.makeToast(R.string.toast_copied)
+                            }
                         }
-                        2 -> scheduledMessageRepo.deleteScheduledMessage(messageId)
+                        2 -> Completable.fromAction {
+                            scheduledMessageRepo.deleteScheduledMessage(messageId)
+                        }.subscribeOn(Schedulers.io())
+                         .observeOn(AndroidSchedulers.mainThread())
+                        else -> Completable.complete()
                     }
-                    Unit
                 }
                 .autoDisposable(view.scope())
                 .subscribe()

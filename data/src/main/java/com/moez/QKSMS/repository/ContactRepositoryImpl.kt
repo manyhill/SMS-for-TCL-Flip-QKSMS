@@ -39,7 +39,7 @@ import io.realm.Realm
 import io.realm.RealmResults
 import javax.inject.Inject
 import javax.inject.Singleton
-
+import com.moez.QKSMS.util.RealmProvider
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
     private val context: Context,
@@ -67,7 +67,7 @@ class ContactRepositoryImpl @Inject constructor(
     }
 
     override fun getContacts(): RealmResults<Contact> {
-        val realm = Realm.getDefaultInstance()
+        val realm = RealmProvider.get()
         return realm.where(Contact::class.java)
                 .sort("name")
                 .findAll()
@@ -83,7 +83,7 @@ class ContactRepositoryImpl @Inject constructor(
     }
 
     override fun getUnmanagedContacts(starred: Boolean): Observable<List<Contact>> {
-        val realm = Realm.getDefaultInstance()
+        val realm = RealmProvider.get()
 
         val mobileOnly = prefs.mobileOnly.get()
         val mobileLabel by lazy { Phone.getTypeLabel(context.resources, Phone.TYPE_MOBILE, "Mobile").toString() }
@@ -134,7 +134,7 @@ class ContactRepositoryImpl @Inject constructor(
     }
 
     override fun getUnmanagedContactGroups(): Observable<List<ContactGroup>> {
-        val realm = Realm.getDefaultInstance()
+        val realm = RealmProvider.get()
         return realm.where(ContactGroup::class.java)
                 .isNotEmpty("contacts")
                 .findAllAsync()

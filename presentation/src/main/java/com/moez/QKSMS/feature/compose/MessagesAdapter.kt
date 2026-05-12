@@ -25,6 +25,7 @@ import android.os.Build
 import android.text.Layout
 import android.text.Spannable
 import android.text.SpannableString
+import android.text.style.BackgroundColorSpan
 import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -32,7 +33,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.jakewharton.rxbinding2.view.clicks
 import com.moez.QKSMS.R
@@ -48,8 +51,10 @@ import com.moez.QKSMS.common.util.extensions.setPadding
 import com.moez.QKSMS.common.util.extensions.setTint
 import com.moez.QKSMS.common.util.extensions.setVisible
 import com.moez.QKSMS.compat.SubscriptionManagerCompat
+import com.moez.QKSMS.extensions.isImage
 import com.moez.QKSMS.extensions.isSmil
 import com.moez.QKSMS.extensions.isText
+import com.moez.QKSMS.extensions.isVideo
 import com.moez.QKSMS.feature.compose.BubbleUtils.canGroup
 import com.moez.QKSMS.feature.compose.BubbleUtils.getBubble
 import com.moez.QKSMS.feature.compose.part.PartsAdapter
@@ -73,6 +78,7 @@ import kotlinx.android.synthetic.main.message_list_item_in.view.*
 import kotlinx.android.synthetic.main.message_list_item_out.*
 import java.util.*
 import java.util.concurrent.TimeUnit
+import java.util.WeakHashMap
 import javax.inject.Inject
 import javax.inject.Provider
 
@@ -90,55 +96,105 @@ class MessagesAdapter @Inject constructor(
     companion object {
         private const val VIEW_TYPE_MESSAGE_IN = 0
         private const val VIEW_TYPE_MESSAGE_OUT = 1
+        private const val MESSAGE_TEXT_CACHE_MAX = 160
 
         // Thanks to Cory Kilger for this regex
         // https://gist.github.com/cmkilger/b8f7dba3e76244a84e7e
         private val EMOJI_REGEX = Regex(
-                "^[\\s\n\r]*(?:(?:[\u00a9\u00ae\u203c\u2049\u2122\u2139\u2194-\u2199\u21a9-\u21aa\u231a-\u231b\u2328\u23cf\u23e9-\u23f3\u23f8-\u23fa\u24c2\u25aa-\u25ab\u25b6\u25c0\u25fb-\u25fe\u2600-\u2604\u260e\u2611\u2614-\u2615\u2618\u261d\u2620\u2622-\u2623\u2626\u262a\u262e-\u262f\u2638-\u263a\u2648-\u2653\u2660\u2663\u2665-\u2666\u2668\u267b\u267f\u2692-\u2694\u2696-\u2697\u2699\u269b-\u269c\u26a0-\u26a1\u26aa-\u26ab\u26b0-\u26b1\u26bd-\u26be\u26c4-\u26c5\u26c8\u26ce-\u26cf\u26d1\u26d3-\u26d4\u26e9-\u26ea\u26f0-\u26f5\u26f7-\u26fa\u26fd\u2702\u2705\u2708-\u270d\u270f\u2712\u2714\u2716\u271d\u2721\u2728\u2733-\u2734\u2744\u2747\u274c\u274e\u2753-\u2755\u2757\u2763-\u2764\u2795-\u2797\u27a1\u27b0\u27bf\u2934-\u2935\u2b05-\u2b07\u2b1b-\u2b1c\u2b50\u2b55\u3030\u303d\u3297\u3299\ud83c\udc04\ud83c\udccf\ud83c\udd70-\ud83c\udd71\ud83c\udd7e-\ud83c\udd7f\ud83c\udd8e\ud83c\udd91-\ud83c\udd9a\ud83c\ude01-\ud83c\ude02\ud83c\ude1a\ud83c\ude2f\ud83c\ude32-\ud83c\ude3a\ud83c\ude50-\ud83c\ude51\u200d\ud83c\udf00-\ud83d\uddff\ud83d\ude00-\ud83d\ude4f\ud83d\ude80-\ud83d\udeff\ud83e\udd00-\ud83e\uddff\udb40\udc20-\udb40\udc7f]|\u200d[\u2640\u2642]|[\ud83c\udde6-\ud83c\uddff]{2}|.[\u20e0\u20e3\ufe0f]+)+[\\s\n\r]*)+$")
-
+            "^[\\s\\n\\r]*(?:(?:[\u00a9\u00ae\u203c\u2049\u2122\u2139\u2194-\u2199\u21a9-\u21aa\u231a-\u231b\u2328\u23cf\u23e9-\u23f3\u23f8-\u23fa\u24c2\u25aa-\u25ab\u25b6\u25c0\u25fb-\u25fe\u2600-\u2604\u260e\u2611\u2614-\u2615\u2618\u261d\u2620\u2622-\u2623\u2626\u262a\u262e-\u262f\u2638-\u263a\u2648-\u2653\u2660\u2663\u2665-\u2666\u2668\u267b\u267f\u2692-\u2694\u2696-\u2697\u2699\u269b-\u269c\u26a0-\u26a1\u26aa-\u26ab\u26b0-\u26b1\u26bd-\u26be\u26c4-\u26c5\u26c8\u26ce-\u26cf\u26d1\u26d3-\u26d4\u26e9-\u26ea\u26f0-\u26f5\u26f7-\u26fa\u26fd\u2702\u2705\u2708-\u270d\u270f\u2712\u2714\u2716\u271d\u2721\u2728\u2733-\u2734\u2744\u2747\u274c\u274e\u2753-\u2755\u2757\u2763-\u2764\u2795-\u2797\u27a1\u27b0\u27bf\u2934-\u2935\u2b05-\u2b07\u2b1b-\u2b1c\u2b50\u2b55\u3030\u303d\u3297\u3299\ud83c\udc04\ud83c\udccf\ud83c\udd70-\ud83c\udd71\ud83c\udd7e-\ud83c\udd7f\ud83c\udd8e\ud83c\udd91-\ud83c\udd9a\ud83c\ude01-\ud83c\ude02\ud83c\ude1a\ud83c\ude2f\ud83c\ude32-\ud83c\ude3a\ud83c\ude50-\ud83c\ude51\u200d\ud83c\udf00-\ud83d\uddff\ud83d\ude00-\ud83d\ude4f\ud83d\ude80-\ud83d\udeff\ud83e\udd00-\ud83e\uddff\udb40\udc20-\udb40\udc7f]|\u200d[\u2640\u2642]|[\ud83c\udde6-\ud83c\uddff]{2}|.[\u20e0\u20e3\ufe0f]+)+[\\s\\n\\r]*)+$"
+        )
     }
+
+    private data class CancelProgressState(val messageId: Long, val targetTime: Long)
 
     private var lastFocusedView: View? = null
     var onLastItemFocused: (() -> Unit)? = null
-
 
     val clicks: Subject<Long> = PublishSubject.create()
     val partClicks: Subject<Long> = PublishSubject.create()
     val cancelSending: Subject<Long> = PublishSubject.create()
 
-    var data: Pair<Conversation, RealmResults<Message>>? = null
+    // Renamed to avoid shadowing QkRealmAdapter.data
+    var threadData: Pair<Conversation, RealmResults<Message>>? = null
         set(value) {
             if (field === value) return
-
             field = value
             contactCache.clear()
-
-            updateData(value?.second)
+            messageTextCache.clear()
+            updateData(value?.second) // hand results to the base adapter
         }
 
-    /**
-     * Safely return the conversation, if available
-     */
+    /** Safely return the conversation, if available */
     private val conversation: Conversation?
-        get() = data?.first?.takeIf { it.isValid }
+        get() = threadData?.first?.takeIf { it.isValid }
 
-    /**
-     * Mark this message as highlighted
-     */
+    /** Mark this message as highlighted */
     var highlight: Long = -1L
         set(value) {
             if (field == value) return
+            val previousHighlight = field
+            field = value
 
+            if (previousHighlight != -1L) {
+                findPositionById(previousHighlight)?.let(::notifyItemChanged)
+            }
+
+            if (value != -1L) {
+                findPositionById(value)?.let(::notifyItemChanged)
+            }
+        }
+
+    var searchQuery: String = ""
+        set(value) {
+            if (field == value) return
             field = value
             notifyDataSetChanged()
         }
 
     private val contactCache = ContactCache()
+    private val messageTextCache = object : LinkedHashMap<Long, CharSequence>(
+        MESSAGE_TEXT_CACHE_MAX,
+        0.75f,
+        true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, CharSequence>?): Boolean {
+            return size > MESSAGE_TEXT_CACHE_MAX
+        }
+    }
     private val expanded = HashMap<Long, Boolean>()
     private val partsViewPool = RecyclerView.RecycledViewPool()
+    private val cancelProgressStates = WeakHashMap<ProgressBar, CancelProgressState>()
+    private val cancelProgressAnimators = WeakHashMap<ProgressBar, ObjectAnimator>()
     private val subs = subscriptionManager.activeSubscriptionInfoList
+    private val subsById = subs.associateBy { it.subscriptionId }
+    private val incomingBubbleColor = ContextCompat.getColor(context, R.color.threadBubbleIncoming)
+    private val incomingBubbleSelectedColor = ContextCompat.getColor(context, R.color.threadBubbleIncomingSelected)
+    private val outgoingBubbleColor = ContextCompat.getColor(context, R.color.threadBubbleOutgoing)
+    private val outgoingBubbleSelectedColor = ContextCompat.getColor(context, R.color.threadBubbleOutgoingSelected)
+    private val bubbleTextColor = ContextCompat.getColor(context, R.color.threadBubbleText)
 
     var theme: Colors.Theme = colors.theme()
+
+    private fun findPositionById(messageId: Long): Int? {
+        for (index in 0 until itemCount) {
+            val item = getItem(index) ?: continue
+            if (item.id == messageId) return index
+        }
+        return null
+    }
+
+    private fun TextView.setTextIfChanged(value: CharSequence?) {
+        if (text?.toString() != value?.toString()) {
+            text = value
+        }
+    }
+
+    private fun View.setVisibleIfChanged(visible: Boolean, invisible: Int = View.GONE) {
+        val newVisibility = if (visible) View.VISIBLE else invisible
+        if (visibility != newVisibility) {
+            visibility = newVisibility
+        }
+    }
 
     /**
      * If the viewType is negative, then the viewHolder has an attachment. We'll consider
@@ -164,7 +220,7 @@ class MessagesAdapter @Inject constructor(
         }
 
         val partsAdapter = partsAdapterProvider.get()
-      //  partsAdapter.clicks.subscribe(partClicks)
+        partsAdapter.clicks.subscribe(partClicks)
         view.attachments.adapter = partsAdapter
         view.attachments.setRecycledViewPool(partsViewPool)
         view.body.forwardTouches(view)
@@ -172,11 +228,31 @@ class MessagesAdapter @Inject constructor(
         return QkViewHolder(view).apply {
             view.setOnClickListener {
                 val message = getItem(adapterPosition) ?: return@setOnClickListener
+                if (message.isSending() && message.date > System.currentTimeMillis()) {
+                    cancelSending.onNext(message.id)
+                    return@setOnClickListener
+                }
                 when (toggleSelection(message.id, false)) {
                     true -> view.isActivated = isSelected(message.id)
                     false -> {
+                        val audioPartId = message.parts
+                            .filterNotNull()
+                            .firstOrNull { part ->
+                                part.type.startsWith("audio/") &&
+                                    !part.isText() &&
+                                    !part.isSmil() &&
+                                    !part.isImage() &&
+                                    !part.isVideo()
+                            }
+                            ?.id
 
-                        clicks.onNext(message.id)
+                        if (audioPartId != null) {
+                            if (!partsAdapter.performClick(audioPartId)) {
+                                partClicks.onNext(audioPartId)
+                            }
+                        } else {
+                            clicks.onNext(message.id)
+                        }
                         expanded[message.id] = view.status.visibility != View.VISIBLE
                         notifyItemChanged(adapterPosition)
                     }
@@ -184,9 +260,15 @@ class MessagesAdapter @Inject constructor(
             }
             view.setOnLongClickListener {
                 val message = getItem(adapterPosition) ?: return@setOnLongClickListener true
-                toggleSelection(message.id)
+                selectOnly(message.id)
                 view.isActivated = isSelected(message.id)
                 true
+            }
+            view.findViewById<ProgressBar?>(R.id.cancel)?.setOnClickListener {
+                val position = adapterPosition.takeIf { pos -> pos != RecyclerView.NO_POSITION }
+                    ?: return@setOnClickListener
+                val message = getItem(position) ?: return@setOnClickListener
+                cancelSending.onNext(message.id)
             }
         }
     }
@@ -207,23 +289,42 @@ class MessagesAdapter @Inject constructor(
         // Bind the cancel view
         holder.cancel?.let { cancel ->
             val isCancellable = message.isSending() && message.date > System.currentTimeMillis()
-            cancel.setVisible(isCancellable)
-            cancel.clicks().subscribe { cancelSending.onNext(message.id) }
-            cancel.progress = 2
-
-            if (isCancellable) {
-                val delay = when (prefs.sendDelay.get()) {
-                    Preferences.SEND_DELAY_SHORT -> 3000
-                    Preferences.SEND_DELAY_MEDIUM -> 5000
-                    Preferences.SEND_DELAY_LONG -> 10000
-                    else -> 0
+            cancel.setVisibleIfChanged(isCancellable)
+            if (!isCancellable) {
+                cancelProgressAnimators.remove(cancel)?.cancel()
+                cancelProgressStates.remove(cancel)
+                if (cancel.progress != 2) {
+                    cancel.progress = 2
                 }
-                val progress = (1 - (message.date - System.currentTimeMillis()) / delay.toFloat()) * 100
-
-                ObjectAnimator.ofInt(cancel, "progress", progress.toInt(), 100)
-                        .setDuration(message.date - System.currentTimeMillis())
-                        .start()
+                return@let
             }
+
+            val delay = when (prefs.sendDelay.get()) {
+                Preferences.SEND_DELAY_SHORT -> 3000
+                Preferences.SEND_DELAY_MEDIUM -> 5000
+                Preferences.SEND_DELAY_LONG -> 10000
+                else -> 0
+            }
+            if (delay <= 0) return@let
+
+            val remaining = (message.date - System.currentTimeMillis()).coerceAtLeast(0L)
+            val progress = ((1 - remaining / delay.toFloat()) * 100).toInt().coerceIn(0, 100)
+            val newState = CancelProgressState(message.id, message.date)
+            val previousState = cancelProgressStates[cancel]
+
+            if (cancel.progress != progress) {
+                cancel.progress = progress
+            }
+
+            if (previousState == newState) return@let
+
+            cancelProgressAnimators.remove(cancel)?.cancel()
+            val animator = ObjectAnimator.ofInt(cancel, "progress", progress, 100).apply {
+                duration = remaining
+                start()
+            }
+            cancelProgressStates[cancel] = newState
+            cancelProgressAnimators[cancel] = animator
         }
 
         // Bind the message status
@@ -231,68 +332,109 @@ class MessagesAdapter @Inject constructor(
 
         // Bind the timestamp
         val timeSincePrevious = TimeUnit.MILLISECONDS.toMinutes(message.date - (previous?.date ?: 0))
-        val subscription = subs.find { sub -> sub.subscriptionId == message.subId }
+        val subscription = subsById[message.subId]
 
-       // holder.isMms.text=message.isMms().toString() //manyhill
+        // holder.isMms.text=message.isMms().toString() //manyhill
 
-        holder.timestamp.text = dateFormatter.getMessageTimestamp(message.date)
-        holder.simIndex.text = subscription?.simSlotIndex?.plus(1)?.toString()
+        holder.timestamp.setTextIfChanged(dateFormatter.getMessageTimestamp(message.date))
+        holder.simIndex.setTextIfChanged(subscription?.simSlotIndex?.plus(1)?.toString())
 
-        holder.timestamp.setVisible(timeSincePrevious >= BubbleUtils.TIMESTAMP_THRESHOLD
-                || message.subId != previous?.subId && subscription != null)
+        holder.timestamp.setVisibleIfChanged(
+            timeSincePrevious >= BubbleUtils.TIMESTAMP_THRESHOLD
+                    || message.subId != previous?.subId && subscription != null
+        )
 
-        holder.sim.setVisible(message.subId != previous?.subId && subscription != null && subs.size > 1)
-        holder.simIndex.setVisible(message.subId != previous?.subId && subscription != null && subs.size > 1)
+        holder.sim.setVisibleIfChanged(message.subId != previous?.subId && subscription != null && subs.size > 1)
+        holder.simIndex.setVisibleIfChanged(message.subId != previous?.subId && subscription != null && subs.size > 1)
 
         // Bind the grouping
         val media = message.parts.filter { !it.isSmil() && !it.isText() }
         holder.containerView.setPadding(bottom = if (canGroup(message, next)) 0 else 16.dpToPx(context))
 
+        val isActivated = holder.containerView.isActivated
+
         // Bind the avatar and bubble colour
         if (!message.isMe()) {
-            holder.avatar.setRecipient(contactCache[message.address])
-            holder.avatar.setVisible(!canGroup(message, next), View.INVISIBLE)
+            val sender = contactCache[message.address]
+            holder.avatar.setRecipient(sender)
+            val showSenderAvatar = (conversation?.recipients?.size ?: 0) > 1 && !canGroup(message, next)
+            holder.avatar.setVisible(showSenderAvatar, View.INVISIBLE)
+            holder.senderName?.setVisible(showSenderAvatar)
+            if (showSenderAvatar) {
+                holder.senderName?.setTextIfChanged(sender?.getDisplayName()?.substringBefore(' ') ?: message.address)
+            }
 
-            holder.body.setTextColor(theme.textPrimary)
-            holder.body.setBackgroundTint(theme.theme)
-
+            holder.body.setTextColor(bubbleTextColor)
+            holder.body.setBackgroundTint(
+                if (isActivated) incomingBubbleSelectedColor else incomingBubbleColor
+            )
         }
 
         // Bind the body text
-        val messageText = when (message.isSms()) {
-            true -> message.body
-            false -> {
-                val subject = message.getCleansedSubject()
-                val body = message.parts
+        val messageText = messageTextCache.getOrPut(message.id) {
+            when (message.isSms()) {
+                true -> message.body
+                false -> {
+                    val subject = message.getCleansedSubject()
+                    val body = message.parts
                         .filter { part -> part.isText() }
                         .mapNotNull { part -> part.text }
                         .filter { text -> text.isNotBlank() }
                         .joinToString("\n")
 
-                when {
-                    subject.isNotBlank() -> {
-                        val spannable = SpannableString(if (body.isNotBlank()) "$subject\n$body" else subject)
-                        spannable.setSpan(StyleSpan(Typeface.BOLD), 0, subject.length,
-                                Spannable.SPAN_INCLUSIVE_EXCLUSIVE)
-                        spannable
+                    when {
+                        subject.isNotBlank() -> {
+                            val spannable = SpannableString(if (body.isNotBlank()) "$subject\n$body" else subject)
+                            spannable.setSpan(
+                                StyleSpan(Typeface.BOLD),
+                                0,
+                                subject.length,
+                                Spannable.SPAN_INCLUSIVE_EXCLUSIVE
+                            )
+                            spannable
+                        }
+                        else -> body
                     }
-                    else -> body
                 }
             }
         }
         val emojiOnly = messageText.isNotBlank() && messageText.matches(EMOJI_REGEX)
-        textViewStyler.setTextSize(holder.body, when (emojiOnly) {
-            true -> TextViewStyler.SIZE_EMOJI
-            false -> TextViewStyler.SIZE_PRIMARY
-        })
+        textViewStyler.setTextSize(
+            holder.body,
+            when (emojiOnly) {
+                true -> TextViewStyler.SIZE_EMOJI
+                false -> TextViewStyler.SIZE_PRIMARY
+            }
+        )
 
-        holder.body.text = messageText
-        holder.body.setVisible(message.isSms() || messageText.isNotBlank())
-        holder.body.setBackgroundResource(getBubble(
-                emojiOnly = emojiOnly,
-                canGroupWithPrevious = canGroup(message, previous) || media.isNotEmpty(),
-                canGroupWithNext = canGroup(message, next),
-                isMe = message.isMe()))
+        holder.body.setTextIfChanged(highlightSearchMatches(messageText))
+        holder.body.setVisibleIfChanged(message.isSms() || messageText.isNotBlank())
+        val bubble = getBubble(
+            emojiOnly = emojiOnly,
+            canGroupWithPrevious = canGroup(message, previous) || media.isNotEmpty(),
+            canGroupWithNext = canGroup(message, next),
+            isMe = message.isMe()
+        )
+        holder.body.setBackgroundResource(bubble)
+        holder.body.post {
+            val position = holder.adapterPosition.takeIf { it != RecyclerView.NO_POSITION } ?: return@post
+            if (getItem(position)?.id != message.id) return@post
+
+            val adjustedBubble = when {
+                bubble == R.drawable.message_only && holder.body.lineCount > 1 -> R.drawable.message_only_multiline
+                else -> bubble
+            }
+            holder.body.setBackgroundResource(adjustedBubble)
+            holder.body.setTextColor(bubbleTextColor)
+            holder.body.setBackgroundTint(
+                when {
+                    message.isMe() && isActivated -> outgoingBubbleSelectedColor
+                    message.isMe() -> outgoingBubbleColor
+                    isActivated -> incomingBubbleSelectedColor
+                    else -> incomingBubbleColor
+                }
+            )
+        }
 
         // Bind the attachments
         val partsAdapter = holder.attachments.adapter as PartsAdapter
@@ -302,11 +444,7 @@ class MessagesAdapter @Inject constructor(
         if (position == itemCount - 1) {
             holder.itemView.setOnFocusChangeListener { view, hasFocus ->
                 if (hasFocus && view != lastFocusedView) {
-                    // Last item has focus and the previously focused view is not the same as this view
-                    // Call the callback method
                     onLastItemFocused?.invoke()
-
-                    // Set the last focused view to this view
                     lastFocusedView = view
                 }
             }
@@ -315,13 +453,43 @@ class MessagesAdapter @Inject constructor(
         }
     }
 
+    private fun highlightSearchMatches(text: CharSequence): CharSequence {
+        val query = searchQuery.trim()
+        if (query.isEmpty() || text.isEmpty()) return text
+
+        val spannable = SpannableString(text)
+        val source = text.toString()
+        var start = source.indexOf(query, ignoreCase = true)
+        while (start >= 0) {
+            val end = start + query.length
+            spannable.setSpan(
+                BackgroundColorSpan(0x66FFD54F),
+                start,
+                end,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            start = source.indexOf(query, startIndex = end, ignoreCase = true)
+        }
+        return spannable
+    }
+
+    override fun onViewRecycled(holder: QkViewHolder) {
+        holder.cancel?.let { cancel ->
+            cancelProgressAnimators.remove(cancel)?.cancel()
+            cancelProgressStates.remove(cancel)
+        }
+        super.onViewRecycled(holder)
+    }
+
     private fun bindStatus(holder: QkViewHolder, message: Message, next: Message?) {
         val age = TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - message.date)
 
-        holder.status.text = when {
+        val statusText = when {
             message.isSending() -> context.getString(R.string.message_status_sending)
-            message.isDelivered() -> context.getString(R.string.message_status_delivered,
-                    dateFormatter.getTimestamp(message.dateSent))
+            message.isDelivered() -> context.getString(
+                R.string.message_status_delivered,
+                dateFormatter.getTimestamp(message.dateSent)
+            )
             message.isFailedMessage() -> context.getString(R.string.message_status_failed)
 
             // Incoming group message
@@ -331,8 +499,9 @@ class MessagesAdapter @Inject constructor(
 
             else -> dateFormatter.getTimestamp(message.date)
         }
+        holder.status.setTextIfChanged(statusText)
 
-        holder.status.setVisible(when {
+        val statusVisible = when {
             expanded[message.id] == true -> true
             message.isSending() -> true
             message.isFailedMessage() -> true
@@ -340,7 +509,8 @@ class MessagesAdapter @Inject constructor(
             conversation?.recipients?.size ?: 0 > 1 && !message.isMe() && next?.compareSender(message) != true -> true
             message.isDelivered() && next?.isDelivered() != true && age <= BubbleUtils.TIMESTAMP_THRESHOLD -> true
             else -> false
-        })
+        }
+        holder.status.setVisibleIfChanged(statusVisible)
     }
 
     override fun getItemViewType(position: Int): Int {
@@ -361,9 +531,7 @@ class MessagesAdapter @Inject constructor(
             if (super.get(key)?.isValid != true) {
                 set(key, conversation?.recipients?.firstOrNull { phoneNumberUtils.compare(it.address, key) })
             }
-
             return super.get(key)?.takeIf { it.isValid }
         }
-
     }
 }

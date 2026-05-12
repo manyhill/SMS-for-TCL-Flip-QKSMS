@@ -42,13 +42,20 @@ import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.rxkotlin.Observables
 import io.reactivex.rxkotlin.withLatestFrom
 import io.reactivex.schedulers.Schedulers
+import io.reactivex.subjects.BehaviorSubject
 import io.realm.RealmList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.rx2.awaitFirst
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Named
+
+private const val CONTACT_SEARCH_DEBOUNCE_MS = 180L
+private const val CONTACT_SEARCH_RESULT_LIMIT = 75
 
 class ContactsViewModel @Inject constructor(
-    sharing: Boolean,
+    @Named("sharing") sharing: Boolean,
+    @Named("singleRecipient") private val singleRecipient: Boolean,
     serializedChips: HashMap<String, String?>,
     private val contactFilter: ContactFilter,
     private val contactGroupFilter: ContactGroupFilter,
@@ -65,28 +72,33 @@ class ContactsViewModel @Inject constructor(
     }
     private val starredContacts: Observable<List<Contact>> by lazy { contactsRepo.getUnmanagedContacts(true) }
 
-    private val selectedChips = Observable.just(serializedChips)
-            .observeOn(Schedulers.io())
-            .map { hashmap ->
-                hashmap.map { (address, lookupKey) ->
-                    Recipient(address = address, contact = lookupKey?.let(contactsRepo::getUnmanagedContact))
-                }
+    private val selectedChipMap = BehaviorSubject.createDefault(HashMap(serializedChips))
+    private val selectedChips = selectedChipMap
+        .observeOn(Schedulers.io())
+        .map { hashmap ->
+            hashmap.map { (address, lookupKey) ->
+                Recipient(address = address, contact = lookupKey?.let(contactsRepo::getUnmanagedContact))
             }
+        }
 
-    private var shouldOpenKeyboard: Boolean = true
+    private var shouldFocusContacts: Boolean = true
 
     override fun bindView(view: ContactsContract) {
         super.bindView(view)
 
-        if (shouldOpenKeyboard) {
-            view.openKeyboard()
-            shouldOpenKeyboard = false
+        if (shouldFocusContacts) {
+            view.focusContacts()
+            shouldFocusContacts = false
         }
 
+        val queryChanged = view.queryChangedIntent
+            .map { query -> query.toString() }
+            .distinctUntilChanged()
+
         // Update the state's query, so we know if we should show the cancel button
-        view.queryChangedIntent
+        queryChanged
                 .autoDisposable(view.scope())
-                .subscribe { query -> newState { copy(query = query.toString()) } }
+                .subscribe { query -> newState { copy(query = query) } }
 
         // Clear the query
         view.queryClearedIntent
@@ -94,41 +106,28 @@ class ContactsViewModel @Inject constructor(
                 .subscribe { view.clearQuery() }
 
         // Update the list of contact suggestions based on the query input, while also filtering out any contacts
-        // that have already been selected
+        // based on the query input
         Observables
                 .combineLatest(
-                        view.queryChangedIntent, recents, starredContacts, contactGroups, contacts, selectedChips
+                        queryChanged.debounce(CONTACT_SEARCH_DEBOUNCE_MS, TimeUnit.MILLISECONDS),
+                        recents,
+                        starredContacts,
+                        contactGroups,
+                        contacts,
+                        selectedChips
                 ) { query, recents, starredContacts, contactGroups, contacts, selectedChips ->
                     val composeItems = mutableListOf<ComposeItem>()
                     if (query.isBlank()) {
                         composeItems += recents
-                                .filter { conversation ->
-                                    conversation.recipients.any { recipient ->
-                                        selectedChips.none { chip ->
-                                            if (recipient.contact == null) {
-                                                chip.address == recipient.address
-                                            } else {
-                                                chip.contact?.lookupKey == recipient.contact?.lookupKey
-                                            }
-                                        }
-                                    }
-                                }
                                 .map(ComposeItem::Recent)
 
                         composeItems += starredContacts
-                                .filter { contact -> selectedChips.none { it.contact?.lookupKey == contact.lookupKey } }
                                 .map(ComposeItem::Starred)
 
                         composeItems += contactGroups
-                                .filter { group ->
-                                    group.contacts.any { contact ->
-                                        selectedChips.none { chip -> chip.contact?.lookupKey == contact.lookupKey }
-                                    }
-                                }
                                 .map(ComposeItem::Group)
 
                         composeItems += contacts
-                                .filter { contact -> selectedChips.none { it.contact?.lookupKey == contact.lookupKey } }
                                 .map(ComposeItem::Person)
                     } else {
                         // If the entry is a valid destination, allow it as a recipient
@@ -143,32 +142,36 @@ class ContactsViewModel @Inject constructor(
                         val normalizedQuery = query.removeAccents()
                         composeItems += starredContacts
                                 .asSequence()
-                                .filter { contact -> selectedChips.none { it.contact?.lookupKey == contact.lookupKey } }
                                 .filter { contact -> contactFilter.filter(contact, normalizedQuery) }
                                 .map(ComposeItem::Starred)
 
                         composeItems += contactGroups
                                 .asSequence()
-                                .filter { group ->
-                                    group.contacts.any { contact ->
-                                        selectedChips.none { chip -> chip.contact?.lookupKey == contact.lookupKey }
-                                    }
-                                }
                                 .filter { group -> contactGroupFilter.filter(group, normalizedQuery) }
                                 .map(ComposeItem::Group)
 
                         composeItems += contacts
                                 .asSequence()
-                                .filter { contact -> selectedChips.none { it.contact?.lookupKey == contact.lookupKey } }
                                 .filter { contact -> contactFilter.filter(contact, normalizedQuery) }
+                                .take(CONTACT_SEARCH_RESULT_LIMIT)
                                 .map(ComposeItem::Person)
                     }
 
-                    composeItems
+                    composeItems.sortedByDescending { item ->
+                        item.getContacts().any { contact ->
+                            contact.numbers.any { number ->
+                                selectedChips.any { chip -> phoneNumberUtils.compare(chip.address, number.address) }
+                            }
+                        }
+                    }
                 }
                 .subscribeOn(Schedulers.computation())
                 .autoDisposable(view.scope())
                 .subscribe { items -> newState { copy(composeItems = items) } }
+
+        selectedChipMap
+            .autoDisposable(view.scope())
+            .subscribe { chips -> newState { copy(selectedChips = HashMap(chips)) } }
 
         // Listen for ComposeItems being selected, and then send them off to the number picker dialog in case
         // the user needs to select a phone number
@@ -207,10 +210,37 @@ class ContactsViewModel @Inject constructor(
                         }
                     })
                 }
-                .filter { result -> result.isNotEmpty() }
                 .observeOn(AndroidSchedulers.mainThread())
                 .autoDisposable(view.scope())
-                .subscribe { result -> view.finish(result) }
+                .subscribe { result ->
+                    if (result.isEmpty()) return@subscribe
+
+                    if (singleRecipient) {
+                        view.finish(HashMap(result.entries.take(1).associate { it.toPair() }))
+                        return@subscribe
+                    }
+
+                    val updated = HashMap(selectedChipMap.value ?: hashMapOf())
+                    val allSelected = result.keys.all { key ->
+                        updated.keys.any { selected -> phoneNumberUtils.compare(selected, key) }
+                    }
+
+                    if (allSelected) {
+                        result.keys.forEach { key ->
+                            updated.keys.firstOrNull { selected -> phoneNumberUtils.compare(selected, key) }
+                                ?.let(updated::remove)
+                        }
+                    } else {
+                        updated.putAll(result)
+                    }
+
+                    selectedChipMap.onNext(updated)
+                }
+
+        view.doneIntent
+            .withLatestFrom(selectedChipMap) { _, selected -> HashMap(selected) }
+            .autoDisposable(view.scope())
+            .subscribe(view::finish)
     }
 
 }

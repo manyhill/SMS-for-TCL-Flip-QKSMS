@@ -39,7 +39,7 @@ interface CursorToMessage : Mapper<Pair<Cursor, CursorToMessage.MessageColumns>,
         val read by lazy { getColumnIndex(Mms.READ) }
         val threadId by lazy { getColumnIndex(Mms.THREAD_ID) }
         val locked by lazy { getColumnIndex(Mms.LOCKED) }
-        val subId by lazy { getColumnIndex(Mms.SUBSCRIPTION_ID) }
+        val subId by lazy { getOptionalColumnIndex(Mms.SUBSCRIPTION_ID) }
 
         val smsAddress by lazy { getColumnIndex(Sms.ADDRESS) }
         val smsBody by lazy { getColumnIndex(Sms.BODY) }
@@ -55,7 +55,7 @@ interface CursorToMessage : Mapper<Pair<Cursor, CursorToMessage.MessageColumns>,
         val mmsMessageBox by lazy { getColumnIndex(Mms.MESSAGE_BOX) }
         val mmsDeliveryReport by lazy { getColumnIndex(Mms.DELIVERY_REPORT) }
         val mmsReadReport by lazy { getColumnIndex(Mms.READ_REPORT) }
-        val mmsErrorType by lazy { getColumnIndex(MmsSms.PendingMessages.ERROR_TYPE) }
+        val mmsErrorType by lazy { getOptionalColumnIndex(MmsSms.PendingMessages.ERROR_TYPE) }
         val mmsStatus by lazy { getColumnIndex(Mms.STATUS) }
 
         private fun getColumnIndex(columnsName: String) = try {
@@ -64,5 +64,7 @@ interface CursorToMessage : Mapper<Pair<Cursor, CursorToMessage.MessageColumns>,
             Timber.e("Couldn't find column \'$columnsName\' in ${Arrays.toString(cursor.columnNames)}")
             -1
         }
+
+        private fun getOptionalColumnIndex(columnsName: String) = cursor.getColumnIndex(columnsName)
     }
 }

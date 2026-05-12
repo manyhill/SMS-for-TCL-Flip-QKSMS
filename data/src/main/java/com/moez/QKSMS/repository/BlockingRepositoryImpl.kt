@@ -24,7 +24,7 @@ import com.moez.QKSMS.util.PhoneNumberUtils
 import io.realm.Realm
 import io.realm.RealmResults
 import javax.inject.Inject
-
+import com.moez.QKSMS.util.RealmProvider
 class BlockingRepositoryImpl @Inject constructor(
     private val phoneNumberUtils: PhoneNumberUtils
 ) : BlockingRepository {
@@ -50,13 +50,13 @@ class BlockingRepositoryImpl @Inject constructor(
     }
 
     override fun getBlockedNumbers(): RealmResults<BlockedNumber> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
                 .where(BlockedNumber::class.java)
                 .findAllAsync()
     }
 
     override fun getBlockedNumber(id: Long): BlockedNumber? {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
                 .where(BlockedNumber::class.java)
                 .equalTo("id", id)
                 .findFirst()

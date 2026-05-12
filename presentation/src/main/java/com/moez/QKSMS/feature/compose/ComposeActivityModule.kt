@@ -56,6 +56,12 @@ class ComposeActivityModule {
     }
 
     @Provides
+    @Named("forwardMode")
+    fun provideForwardMode(activity: ComposeActivity): Boolean {
+        return activity.intent.extras?.getBoolean("forward_mode", false) ?: false
+    }
+
+    @Provides
     @Named("text")
     fun provideSharedText(activity: ComposeActivity): String {
         var subject = activity.intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: "";

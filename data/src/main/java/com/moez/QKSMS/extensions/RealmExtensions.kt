@@ -24,15 +24,16 @@ import io.realm.RealmModel
 import io.realm.RealmObject
 import io.realm.RealmQuery
 import io.realm.RealmResults
+import com.moez.QKSMS.util.RealmProvider
 
 fun RealmModel.insertOrUpdate() {
-    val realm = Realm.getDefaultInstance()
+    val realm = RealmProvider.get()
     realm.executeTransaction { realm.insertOrUpdate(this) }
     realm.close()
 }
 
 fun <T : RealmModel> Collection<T>.insertOrUpdate() {
-    val realm = Realm.getDefaultInstance()
+    val realm = RealmProvider.get()
     realm.executeTransaction { realm.insertOrUpdate(this) }
     realm.close()
 }

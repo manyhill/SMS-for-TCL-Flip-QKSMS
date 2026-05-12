@@ -51,6 +51,7 @@ import io.realm.RealmList
 import io.realm.Sort
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.moez.QKSMS.util.RealmProvider
 
 @Singleton
 class SyncRepositoryImpl @Inject constructor(
@@ -77,7 +78,7 @@ class SyncRepositoryImpl @Inject constructor(
         if (syncProgress.blockingFirst() is SyncRepository.SyncProgress.Running) return
         syncProgress.onNext(SyncRepository.SyncProgress.Running(0, 0, true))
 
-        val realm = Realm.getDefaultInstance()
+        val realm = RealmProvider.get()
         realm.beginTransaction()
 
         val persistedData = realm.copyFromRealm(realm.where(Conversation::class.java)

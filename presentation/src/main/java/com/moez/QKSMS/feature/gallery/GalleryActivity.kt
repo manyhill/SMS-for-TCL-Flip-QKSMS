@@ -19,6 +19,8 @@
 package com.moez.QKSMS.feature.gallery
 
 import android.Manifest
+import android.graphics.Matrix
+import android.graphics.RectF
 import android.os.Build
 import android.os.Bundle
 import android.view.*
@@ -30,10 +32,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProviders
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.google.android.exoplayer2.ExoPlayer
+import com.google.android.exoplayer2.ui.PlayerView
+import com.github.chrisbanes.photoview.PhotoView
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.base.QkActivity
 import com.moez.QKSMS.common.util.DateFormatter
 import com.moez.QKSMS.common.util.extensions.setVisible
+import com.moez.QKSMS.extensions.isVideo
 import com.moez.QKSMS.model.MmsPart
 import dagger.android.AndroidInjection
 import io.reactivex.Observable
@@ -44,7 +50,7 @@ import kotlinx.android.synthetic.main.gallery_activity.*
 import kotlinx.android.synthetic.main.gallery_activity.toolbar
 import kotlinx.android.synthetic.main.gallery_activity.toolbarSubtitle
 import kotlinx.android.synthetic.main.gallery_activity.toolbarTitle
-import kotlinx.android.synthetic.main.gallery_image_page.*
+import timber.log.Timber
 import javax.inject.Inject
 
 class GalleryActivity : QkActivity(), GalleryView {
@@ -54,7 +60,8 @@ class GalleryActivity : QkActivity(), GalleryView {
     @Inject lateinit var pagerAdapter: GalleryPagerAdapter
     private lateinit var zoomIn : View
     private lateinit var zoomOut : View
-    private var currentScale = 1.0f
+    private var initialPartSelectionApplied = false
+    private var initialPartSelectionRetries = 20
 
     val partId by lazy { intent.getLongExtra("partId", 0L) }
 
@@ -69,23 +76,15 @@ class GalleryActivity : QkActivity(), GalleryView {
         setContentView(R.layout.gallery_activity)
         showBackButton(true)
         viewModel.bindView(this)
+        Timber.d("Gallery onCreate partId=%d", partId)
 zoomIn = findViewById(R.id.zoomin)
         zoomOut=findViewById(R.id.zoomout)
 
-        zoomIn.setOnClickListener {
-            if(currentScale>1) {
-                currentScale -= 1f
-                image.setScale(currentScale, true)
-            }
-        }
-        zoomOut.setOnClickListener {
-        if(currentScale<9) {
-            currentScale += 1f
-            image.setScale(currentScale, true)
-        }
-        }
-       // gallery.requestFocus()
+        zoomIn.setOnClickListener { adjustZoom(-0.75f) }
+        zoomOut.setOnClickListener { adjustZoom(0.75f) }
+
         pager.adapter = pagerAdapter
+        pager.visibility = View.INVISIBLE
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 this@GalleryActivity.onPageSelected(position)
@@ -94,37 +93,179 @@ zoomIn = findViewById(R.id.zoomin)
 
         pagerAdapter.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
             override fun onChanged() {
-                pagerAdapter.data?.takeIf { pagerAdapter.itemCount > 0 }
-                        ?.indexOfFirst { part -> part.id == partId }
-                        ?.let { index ->
-                            onPageSelected(index)
-                            pager.setCurrentItem(index, false)
-                            pagerAdapter.unregisterAdapterDataObserver(this)
-                        }
+                if (applyInitialPartSelection() == true) {
+                    pagerAdapter.unregisterAdapterDataObserver(this)
+                }
             }
         })
+        scheduleInitialPartSelection()
 
     }
-    private fun navigateLeft() {
-        image.scrollBy(-100, 0)
+
+    private fun scheduleInitialPartSelection() {
+        if (initialPartSelectionApplied) return
+        if (initialPartSelectionRetries <= 0) {
+            pager.visibility = View.VISIBLE
+            return
+        }
+
+        root.postDelayed({
+            if (applyInitialPartSelection() == true) {
+                return@postDelayed
+            }
+
+            initialPartSelectionRetries--
+            Timber.d(
+                "Gallery scheduleInitialPartSelection retry remaining=%d requestedPartId=%d itemCount=%d",
+                initialPartSelectionRetries,
+                partId,
+                pagerAdapter.itemCount
+            )
+            scheduleInitialPartSelection()
+        }, 100)
     }
 
-    private fun navigateRight() {
-        image.scrollBy(100, 0)
-    }
-    private fun navigateUp() {
-        image.scrollBy(0, -100)
+    private fun applyInitialPartSelection(): Boolean? {
+        if (initialPartSelectionApplied) return true
+
+        val parts = pagerAdapter.data?.takeIf { pagerAdapter.itemCount > 0 } ?: return false
+        val index = parts.indexOfFirst { part -> part.id == partId }
+        Timber.d(
+            "Gallery applyInitialPartSelection requestedPartId=%d resolvedIndex=%d parts=%s",
+            partId,
+            index,
+            parts.joinToString { part -> "id=${part.id},seq=${part.seq},type=${part.type}" }
+        )
+        if (index < 0) return false
+
+        initialPartSelectionApplied = true
+        pager.setCurrentItem(index, false)
+        pager.visibility = View.VISIBLE
+        onPageSelected(index)
+        return true
     }
 
-    private fun navigateDown() {
-        image.scrollBy(0, 100)
+    private fun currentPagerRecyclerView(): RecyclerView? {
+        return pager.getChildAt(0) as? RecyclerView
     }
+
+    private fun currentPhotoView(): PhotoView? {
+        return currentPagerRecyclerView()
+            ?.findViewHolderForAdapterPosition(pager.currentItem)
+            ?.itemView
+            ?.findViewById(R.id.image)
+    }
+
+    private fun currentPlayerView(): PlayerView? {
+        return currentPagerRecyclerView()
+            ?.findViewHolderForAdapterPosition(pager.currentItem)
+            ?.itemView
+            ?.findViewById(R.id.video)
+    }
+
+    private fun currentVideoPlayer(): ExoPlayer? {
+        return currentPlayerView()?.player as? ExoPlayer
+    }
+
+    private fun currentPart(): MmsPart? = pagerAdapter.getItem(pager.currentItem)
+
+    private fun isCurrentPartVideo(): Boolean = currentPart()?.isVideo() == true
+
+    private fun toggleCurrentVideoPlayback(): Boolean {
+        val player = currentVideoPlayer() ?: return false
+        player.playWhenReady = !player.playWhenReady
+        updateVideoCenterHint()
+        return true
+    }
+
+    private fun seekCurrentVideo(deltaMs: Long): Boolean {
+        val player = currentVideoPlayer() ?: return false
+        val duration = player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val target = (player.currentPosition + deltaMs).coerceIn(0L, duration)
+        if (target == player.currentPosition) return false
+        player.seekTo(target)
+        return true
+    }
+
+    private fun adjustZoom(delta: Float) {
+        val image = currentPhotoView() ?: return
+        val newScale = (image.scale + delta).coerceIn(1f, 5f)
+        if (newScale != image.scale) {
+            image.setScale(newScale, true)
+        }
+    }
+
+    private fun resetCurrentImageZoom(): Boolean {
+        val image = currentPhotoView() ?: return false
+        if (image.scale <= 1f) return false
+        image.setScale(1f, true)
+        return true
+    }
+
+    private fun isCurrentImageZoomed(): Boolean = currentPhotoView()?.scale?.let { it > 1f } == true
+
+    private fun imagePanStepX(image: PhotoView): Float = (image.width * 0.6f).coerceAtLeast(120f)
+
+    private fun imagePanStepY(image: PhotoView): Float = (image.height * 0.6f).coerceAtLeast(120f)
+
+    private fun panCurrentImage(dx: Float, dy: Float): Boolean {
+        val image = currentPhotoView() ?: return false
+        if (image.scale <= 1f) return false
+
+        val matrix = Matrix().also(image.attacher::getSuppMatrix)
+        val rect = RectF(image.displayRect ?: return false)
+
+        var clampedDx = dx
+        var clampedDy = dy
+
+        if (rect.width() <= image.width) {
+            clampedDx = 0f
+        } else {
+            if (rect.left + clampedDx > 0f) clampedDx = -rect.left
+            if (rect.right + clampedDx < image.width) clampedDx = image.width - rect.right
+        }
+
+        if (rect.height() <= image.height) {
+            clampedDy = 0f
+        } else {
+            if (rect.top + clampedDy > 0f) clampedDy = -rect.top
+            if (rect.bottom + clampedDy < image.height) clampedDy = image.height - rect.bottom
+        }
+
+        if (clampedDx == 0f && clampedDy == 0f) return false
+
+        matrix.postTranslate(clampedDx, clampedDy)
+        return image.setDisplayMatrix(matrix)
+    }
+
     fun onPageSelected(position: Int) {
+        pagerAdapter.pauseAllPlayers()
+        Timber.d(
+            "Gallery onPageSelected position=%d currentPartId=%s requestedPartId=%d",
+            position,
+            pagerAdapter.getItem(position)?.id?.toString() ?: "null",
+            partId
+        )
         toolbarSubtitle.text = pagerAdapter.getItem(position)?.messages?.firstOrNull()?.date
                 ?.let(dateFormatter::getDetailedTimestamp)
         toolbarSubtitle.isVisible = toolbarTitle.text.isNotBlank()
+        val videoPage = pagerAdapter.getItem(position)?.isVideo() == true
+        linearLayout_zoom.isVisible = !videoPage
+        linearLayout_seek.isVisible = videoPage
+        updateVideoCenterHint()
 
         pagerAdapter.getItem(position)?.run(pageChangedSubject::onNext)
+    }
+
+    private fun updateVideoCenterHint() {
+        if (!isCurrentPartVideo()) {
+            videoCenterHint.isVisible = false
+            return
+        }
+
+        val playing = currentVideoPlayer()?.playWhenReady == true
+        videoCenterHint.text = if (playing) "||" else "▶"
+        videoCenterHint.isVisible = true
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
@@ -132,32 +273,96 @@ zoomIn = findViewById(R.id.zoomin)
 
         return when (event?.keyCode) {
             KeyEvent.KEYCODE_SOFT_LEFT -> {
-                zoomIn.performClick()
-                true
+                if (isCurrentPartVideo()) {
+                    seekCurrentVideo(-5000) || super.onKeyUp(keyCode, event)
+                } else {
+                    zoomIn.performClick()
+                    true
+                }
             }
 
             KeyEvent.KEYCODE_SOFT_RIGHT -> {
-
+                if (isCurrentPartVideo()) {
+                    seekCurrentVideo(5000) || super.onKeyUp(keyCode, event)
+                } else {
                     zoomOut.performClick()
-                true
+                    true
+                }
+            }
+
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (isCurrentPartVideo()) {
+                    toggleCurrentVideoPlayback() || super.onKeyUp(keyCode, event)
+                } else {
+                    super.onKeyUp(keyCode, event)
+                }
             }
 
             KeyEvent.KEYCODE_DPAD_UP -> {
-                navigateUp()
-            true}
+                if (isCurrentPartVideo()) {
+                    toolbar.setVisible(!toolbar.isVisible)
+                    true
+                } else {
+                    currentPhotoView()?.let { image ->
+                        panCurrentImage(0f, imagePanStepY(image)) || super.onKeyUp(keyCode, event)
+                    } ?: super.onKeyUp(keyCode, event)
+                }
+            }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
-
-                navigateDown()
-                true
-
+                if (isCurrentPartVideo()) {
+                    toolbar.setVisible(!toolbar.isVisible)
+                    true
+                } else {
+                    currentPhotoView()?.let { image ->
+                        panCurrentImage(0f, -imagePanStepY(image)) || super.onKeyUp(keyCode, event)
+                    } ?: super.onKeyUp(keyCode, event)
+                }
             }
             KeyEvent.KEYCODE_DPAD_LEFT -> {
-                navigateLeft()
-                true
+                if (isCurrentPartVideo()) {
+                    if (pager.currentItem > 0) {
+                        pager.currentItem = pager.currentItem - 1
+                        true
+                    } else {
+                        super.onKeyUp(keyCode, event)
+                    }
+                } else {
+                    val handledPan = currentPhotoView()?.let { image ->
+                        panCurrentImage(imagePanStepX(image), 0f)
+                    } ?: false
+                    if (handledPan || isCurrentImageZoomed()) {
+                        true
+                    } else if (pager.currentItem > 0) {
+                        pager.currentItem = pager.currentItem - 1
+                        true
+                    } else {
+                        super.onKeyUp(keyCode, event)
+                    }
+                }
             }
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                navigateRight()
-                true
+                if (isCurrentPartVideo()) {
+                    if (pager.currentItem < pagerAdapter.itemCount - 1) {
+                        pager.currentItem = pager.currentItem + 1
+                        true
+                    } else {
+                        super.onKeyUp(keyCode, event)
+                    }
+                } else {
+                    val handledPan = currentPhotoView()?.let { image ->
+                        panCurrentImage(-imagePanStepX(image), 0f)
+                    } ?: false
+                    if (handledPan || isCurrentImageZoomed()) {
+                        true
+                    } else if (pager.currentItem < pagerAdapter.itemCount - 1) {
+                        pager.currentItem = pager.currentItem + 1
+                        true
+                    } else {
+                        super.onKeyUp(keyCode, event)
+                    }
+                }
             }
 
 
@@ -171,6 +376,13 @@ zoomIn = findViewById(R.id.zoomin)
 
         title = state.title
         pagerAdapter.updateData(state.parts)
+        if (state.parts.isNullOrEmpty()) {
+            pager.visibility = View.INVISIBLE
+        } else if (partId == 0L) {
+            pager.visibility = View.VISIBLE
+        }
+        applyInitialPartSelection()
+        scheduleInitialPartSelection()
     }
 
     override fun optionsItemSelected(): Observable<Int> = optionsItemSubject
@@ -186,6 +398,13 @@ zoomIn = findViewById(R.id.zoomin)
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         menuInflater.inflate(R.menu.gallery, menu)
         return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onBackPressed() {
+        if (!isCurrentPartVideo() && resetCurrentImageZoom()) {
+            return
+        }
+        super.onBackPressed()
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {

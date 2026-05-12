@@ -21,6 +21,7 @@ package com.moez.QKSMS.feature.compose.part
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.recyclerview.widget.RecyclerView
 import com.moez.QKSMS.common.base.QkAdapter
 import com.moez.QKSMS.common.base.QkViewHolder
 import com.moez.QKSMS.common.util.Colors
@@ -36,12 +37,13 @@ import javax.inject.Inject
 
 class PartsAdapter @Inject constructor(
     colors: Colors,
+    audioBinder: AudioBinder,
     fileBinder: FileBinder,
     mediaBinder: MediaBinder,
     vCardBinder: VCardBinder
 ) : QkAdapter<MmsPart>() {
 
-    private val partBinders = listOf(mediaBinder, vCardBinder, fileBinder)
+    private val partBinders = listOf(mediaBinder, vCardBinder, audioBinder, fileBinder)
 
     var theme: Colors.Theme = colors.theme()
         set(value) {
@@ -66,6 +68,13 @@ class PartsAdapter @Inject constructor(
         this.data = message.parts.filter { !it.isSmil() && !it.isText() }
     }
 
+    fun performClick(partId: Long): Boolean {
+        val holder = holder ?: return false
+        val part = data.firstOrNull { it.id == partId } ?: return false
+        val binder = partBinders.firstOrNull { it.canBindPart(part) } ?: return false
+        return binder.performClick(part, holder)
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): QkViewHolder {
         val layout = partBinders.getOrNull(viewType)?.partLayout ?: 0
         val view = LayoutInflater.from(parent.context).inflate(layout, parent, false)
@@ -87,6 +96,16 @@ class PartsAdapter @Inject constructor(
     override fun getItemViewType(position: Int): Int {
         val part = data[position]
         return partBinders.indexOfFirst { it.canBindPart(part) }
+    }
+
+    override fun onViewRecycled(holder: QkViewHolder) {
+        super.onViewRecycled(holder)
+        partBinders.forEach { binder -> binder.onViewRecycled(holder) }
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        partBinders.forEach(PartBinder::onDetachedFromRecyclerView)
     }
 
 }

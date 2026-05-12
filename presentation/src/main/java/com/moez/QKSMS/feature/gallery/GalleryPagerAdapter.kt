@@ -19,10 +19,12 @@
 package com.moez.QKSMS.feature.gallery
 
 import android.content.Context
-import android.icu.util.LocaleData.MeasurementSystem.SI
+import android.graphics.Color
+import android.webkit.MimeTypeMap
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.request.RequestOptions
 import com.bumptech.glide.request.target.Target
 import com.bumptech.glide.request.target.Target.SIZE_ORIGINAL
@@ -49,7 +51,13 @@ import kotlinx.android.synthetic.main.gallery_video_page.*
 import java.util.*
 import javax.inject.Inject
 
-class GalleryPagerAdapter @Inject constructor(private val context: Context) : QkRealmAdapter<MmsPart>() {
+class GalleryPagerAdapter @Inject constructor(
+    private val context: Context
+) : QkRealmAdapter<MmsPart>() {
+
+    init {
+        setHasStableIds(true)
+    }
 
     companion object {
         private const val VIEW_TYPE_INVALID = 0
@@ -66,25 +74,7 @@ class GalleryPagerAdapter @Inject constructor(private val context: Context) : Qk
         val inflater = LayoutInflater.from(parent.context)
         return QkViewHolder(when (viewType) {
             VIEW_TYPE_IMAGE -> inflater.inflate(R.layout.gallery_image_page, parent, false).apply {
-                // When calling the public setter, it doesn't allow the midscale to be the same as the
-                // maxscale or the minscale. We don't want 3 levels and we don't want to modify the library
-                // so let's celebrate the invention of reflection!
-                image.attacher.run {
-                    javaClass.getDeclaredField("mMinScale").run {
-                        isAccessible = true
-                        setFloat(image.attacher, 1f)
-                    }
-                    javaClass.getDeclaredField("mMidScale").run {
-                        isAccessible = true
-                        setFloat(image.attacher, 1f)
-                       // attacher.setScale(attacher.getMaximumScale(), 300, 150, true);
-                    }
-                    javaClass.getDeclaredField("mMaxScale").run {
-                        isAccessible = true
-                        setFloat(image.attacher, 9f)
-                      //  attacher.setScale(attacher.getMaximumScale(), 400, 250, true);
-                    }
-                }
+                image.setScaleLevels(1f, 2.5f, 5f)
             }
 
             VIEW_TYPE_VIDEO -> inflater.inflate(R.layout.gallery_video_page, parent, false)
@@ -98,34 +88,70 @@ class GalleryPagerAdapter @Inject constructor(private val context: Context) : Qk
         val part = getItem(position) ?: return
         when (getItemViewType(position)) {
             VIEW_TYPE_IMAGE -> {
-                // We need to explicitly request a gif from glide for animations to work
-                when (part.getUri().let(contentResolver::getType)) {
+                val imageModel = part.getUri()
+
+                // Request GIFs explicitly for animation
+                when (part.getUri().let(contentResolver::getType)
+                    ?: MimeTypeMap.getSingleton()
+                        .getMimeTypeFromExtension(part.getUri().lastPathSegment?.substringAfterLast('.', "")?.toLowerCase(Locale.getDefault()))
+                ) {
                     ContentType.IMAGE_GIF -> GlideApp.with(context)
-                            .asGif()
-                            .apply(RequestOptions().override(Target.SIZE_ORIGINAL))
-                        .load(part.getUri())
+                        .asGif()
+                        .apply(RequestOptions().override(Target.SIZE_ORIGINAL))
+                        .load(imageModel)
                         .into(holder.image)
 
                     else -> GlideApp.with(context)
-                            .asBitmap()
+                        .asBitmap()
                         .apply(RequestOptions().override(Target.SIZE_ORIGINAL))
-                            .load(part.getUri())
-                            .into(holder.image)
+                        .load(imageModel)
+                        .into(holder.image)
                 }
             }
 
             VIEW_TYPE_VIDEO -> {
-                val videoTrackSelectionFactory = AdaptiveTrackSelection.Factory(null)
+                holder.video.player?.let { existingPlayer ->
+                    exoPlayers.remove(existingPlayer as? ExoPlayer)
+                    existingPlayer.stop(true)
+                    existingPlayer.release()
+                }
+
+                // FIX: no-arg AdaptiveTrackSelection.Factory() on newer ExoPlayer
+                val videoTrackSelectionFactory = AdaptiveTrackSelection.Factory()
                 val trackSelector = DefaultTrackSelector(videoTrackSelectionFactory)
                 val exoPlayer = ExoPlayerFactory.newSimpleInstance(context, trackSelector)
                 holder.video.player = exoPlayer
+                holder.video.useController = false
+                holder.video.setShutterBackgroundColor(Color.TRANSPARENT)
                 exoPlayers.add(exoPlayer)
 
-                val dataSourceFactory = DefaultDataSourceFactory(context, Util.getUserAgent(context, "QKSMS"))
-                val videoSource = ExtractorMediaSource.Factory(dataSourceFactory).createMediaSource(part.getUri())
-                exoPlayer?.prepare(videoSource)
+                val dataSourceFactory = DefaultDataSourceFactory(
+                    context,
+                    Util.getUserAgent(context, "QKSMS")
+                )
+                val videoSource = ExtractorMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(part.getUri())
+                exoPlayer.prepare(videoSource)
+                exoPlayer.playWhenReady = false
             }
         }
+    }
+
+    override fun getItemId(position: Int): Long {
+        return getItem(position)?.id ?: RecyclerView.NO_ID
+    }
+
+    override fun onViewRecycled(holder: QkViewHolder) {
+        holder.video?.player?.let { player ->
+            exoPlayers.remove(player as? ExoPlayer)
+            player.stop(true)
+            player.release()
+        }
+        holder.video?.player = null
+        holder.image?.let { image ->
+            GlideApp.with(image).clear(image)
+        }
+        super.onViewRecycled(holder)
     }
 
     override fun getItemViewType(position: Int): Int {
@@ -139,6 +165,12 @@ class GalleryPagerAdapter @Inject constructor(private val context: Context) : Qk
 
     fun destroy() {
         exoPlayers.forEach { exoPlayer -> exoPlayer?.release() }
+        exoPlayers.clear()
     }
 
+    fun pauseAllPlayers() {
+        exoPlayers.forEach { exoPlayer ->
+            exoPlayer?.playWhenReady = false
+        }
+    }
 }

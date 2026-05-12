@@ -2,11 +2,10 @@ package com.moez.QKSMS.feature.main
 
 import android.app.Dialog
 import android.content.Context
-import android.content.DialogInterface
 import android.os.Bundle
-import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.ListView
+import android.widget.TextView
 import com.moez.QKSMS.R
 
 
@@ -14,11 +13,27 @@ class MainOptionsDialog constructor(
     context: Context,
     private val listener: OnMainOptionsDialogItemClickListener,
     private val isArchive: Boolean,
-    private val markPinned: Boolean
+    private val markMuted: Boolean,
+    private val markPinned: Boolean,
+    private val markRead: Boolean,
+    private val multiOnly: Boolean,
+    private val showSelectMultiple: Boolean
 ) : Dialog(context) {
 
     lateinit var listView: ListView
     var isClickDismissed=false
+    private lateinit var actions: List<Int>
+
+    companion object {
+        private const val ACTION_ARCHIVE = 0
+        private const val ACTION_DELETE = 1
+        private const val ACTION_ADD_CONTACT = 2
+        private const val ACTION_MUTE = 3
+        private const val ACTION_PIN = 4
+        private const val ACTION_MARK_UNREAD = 5
+        private const val ACTION_BLOCK = 6
+        private const val ACTION_SELECT_MULTIPLE = 7
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,30 +42,38 @@ class MainOptionsDialog constructor(
         setCanceledOnTouchOutside(true)
 
         listView = findViewById(R.id.option_dialog_list_view)
-        var items: Array<String> = emptyArray()
-        var archiveOption="Archive"
-        var pinOptions="Pin to top"
-        if(isArchive) {    archiveOption="Unarchive"}
-        if(!markPinned){pinOptions="Unpin"}
+        findViewById<TextView>(R.id.options_dialog_title)?.setText(R.string.thread_options)
+        var archiveOption = context.getString(R.string.main_menu_archive)
+        var muteOption = context.getString(R.string.main_menu_mute)
+        var pinOptions = context.getString(R.string.main_menu_pin)
+        var readOption = context.getString(R.string.main_menu_read)
+        if (isArchive) { archiveOption = context.getString(R.string.main_menu_unarchive) }
+        if (markMuted) { muteOption = context.getString(R.string.main_menu_unmute) }
+        if (!markPinned) { pinOptions = context.getString(R.string.main_menu_unpin) }
+        if (!markRead) { readOption = context.getString(R.string.main_menu_unread) }
 
-    items = arrayOf(
+        val actionItems = mutableListOf<Pair<Int, String>>()
 
-        archiveOption,
-        "Delete",
-        "Add to contacts",
-        pinOptions,
-        "Mark unread",
-        "Block"
-    )
+        actionItems += ACTION_DELETE to context.getString(R.string.main_menu_delete)
+        if (!multiOnly) {
+            actionItems += ACTION_MUTE to muteOption
+        }
+        actionItems += ACTION_ARCHIVE to archiveOption
+        actionItems += ACTION_PIN to pinOptions
+        if (!multiOnly) {
+            actionItems += ACTION_ADD_CONTACT to context.getString(R.string.main_menu_add_contact)
+        }
+        actionItems += ACTION_MARK_UNREAD to readOption
+        actionItems += ACTION_BLOCK to context.getString(R.string.main_menu_block)
 
-
+        if (showSelectMultiple) {
+            actionItems += ACTION_SELECT_MULTIPLE to context.getString(R.string.main_menu_select_multiple)
+        }
+        actions = actionItems.map { it.first }
 
         val adapter: ArrayAdapter<String> =
-            ArrayAdapter(context, R.layout.options_dialog_list_item, items)
-        android.R.layout.simple_list_item_1
+            ArrayAdapter(context, R.layout.options_dialog_list_item, actionItems.map { it.second })
         listView.adapter = adapter
-
-        listView.getChildAt( if (isArchive) 0 else 1)?.visibility = View.GONE
 
         initClicks()
     }
@@ -60,23 +83,15 @@ class MainOptionsDialog constructor(
 
     private fun initClicks() {
         listView.setOnItemClickListener { parent, view, position, id ->
-            when (position) {
-                0 -> listener.onArchiveMessageClicked(isArchive)
-
-            //    1 -> listener.onUnarchiveMessageClicked()
-
-                1 -> listener.onDeleteMessagesClicked()
-
-                2 -> listener.onAddToContactsClicked()
-
-                3 -> listener.onPinToTopClicked(markPinned)
-
-//                4 -> listener.onUnpinToTopClicked()
-
-                4 -> listener.onMarkUnreadClicked()
-
-                5 -> listener.onBlockClicked()
-
+            when (actions[position]) {
+                ACTION_ARCHIVE -> listener.onArchiveMessageClicked(isArchive)
+                ACTION_DELETE -> listener.onDeleteMessagesClicked()
+                ACTION_ADD_CONTACT -> listener.onAddToContactsClicked()
+                ACTION_MUTE -> listener.onMuteConversationClicked()
+                ACTION_PIN -> listener.onPinToTopClicked()
+                ACTION_MARK_UNREAD -> listener.onMarkReadClicked()
+                ACTION_BLOCK -> listener.onBlockClicked()
+                ACTION_SELECT_MULTIPLE -> listener.onSelectMultipleClicked()
             }
             isClickDismissed=true
             dismiss()
@@ -89,9 +104,11 @@ class MainOptionsDialog constructor(
         //fun onUnarchiveMessageClicked()
         fun onDeleteMessagesClicked()
         fun onAddToContactsClicked()
-        fun onPinToTopClicked(markPinned: Boolean)
+        fun onMuteConversationClicked()
+        fun onPinToTopClicked()
 //        fun onUnpinToTopClicked()
-        fun onMarkUnreadClicked()
+        fun onMarkReadClicked()
         fun onBlockClicked()
+        fun onSelectMultipleClicked()
     }
 }

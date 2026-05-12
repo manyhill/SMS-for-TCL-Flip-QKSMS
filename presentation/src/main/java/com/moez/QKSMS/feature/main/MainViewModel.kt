@@ -18,6 +18,7 @@
  */
 package com.moez.QKSMS.feature.main
 
+import android.util.Log
 import androidx.recyclerview.widget.ItemTouchHelper
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
@@ -33,6 +34,7 @@ import com.moez.QKSMS.model.SyncLog
 import com.moez.QKSMS.repository.ConversationRepository
 import com.moez.QKSMS.repository.SyncRepository
 import com.moez.QKSMS.util.Preferences
+import com.moez.QKSMS.util.RealmProvider
 import com.uber.autodispose.android.lifecycle.scope
 import com.uber.autodispose.autoDisposable
 import io.reactivex.android.schedulers.AndroidSchedulers
@@ -50,7 +52,7 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     billingManager: BillingManager,
     contactAddedListener: ContactAddedListener,
-    markAllSeen: MarkAllSeen,
+    private val markAllSeen: MarkAllSeen,
     migratePreferences: MigratePreferences,
     syncRepository: SyncRepository,
     private val changelogManager: ChangelogManager,
@@ -63,6 +65,7 @@ class MainViewModel @Inject constructor(
     private val markUnpinned: MarkUnpinned,
     private val markUnread: MarkUnread,
     private val navigator: Navigator,
+    private val notificationManager: com.moez.QKSMS.manager.NotificationManager,
     private val permissionManager: PermissionManager,
     private val prefs: Preferences,
     private val ratingManager: RatingManager,
@@ -96,7 +99,7 @@ class MainViewModel @Inject constructor(
 
         // If we have all permissions and we've never run a sync, run a sync. This will be the case
         // when upgrading from 2.7.3, or if the app's data was cleared
-        val lastSync = Realm.getDefaultInstance()
+        val lastSync = RealmProvider.get()
             .use { realm -> realm.where(SyncLog::class.java)?.max("date") ?: 0 }
         if (lastSync == 0 && permissionManager.isDefaultSms() && permissionManager.hasReadSms() && permissionManager.hasContacts()) {
             syncMessages.execute(Unit)
@@ -109,7 +112,6 @@ class MainViewModel @Inject constructor(
         }
 
         ratingManager.addSession()
-        markAllSeen.execute(Unit)
     }
 
     override fun bindView(view: MainView) {
@@ -145,6 +147,12 @@ class MainViewModel @Inject constructor(
         permissions.skip(1).filter { it.first && it.second && it.third }.take(1)
             .autoDisposable(view.scope()).subscribe { syncMessages.execute(Unit) }
 
+        view.activityResumedIntent
+            .filter { resumed -> resumed }
+            .take(1)
+            .autoDisposable(view.scope())
+            .subscribe { markAllSeen.execute(Unit) }
+
         // Launch screen from intent
         view.onNewIntentIntent.autoDisposable(view.scope()).subscribe { intent ->
                 when (intent.getStringExtra("screen")) {
@@ -153,20 +161,25 @@ class MainViewModel @Inject constructor(
                 }
             }
 
-        // Show changelog
-        if (changelogManager.didUpdate()) {
-            if (Locale.getDefault().language.startsWith("en")) {
-                GlobalScope.launch(Dispatchers.Main) {
-                    val changelog = changelogManager.getChangelog()
+        view.activityResumedIntent
+            .filter { resumed -> resumed }
+            .take(1)
+            .autoDisposable(view.scope())
+            .subscribe {
+                if (changelogManager.didUpdate()) {
+                    if (Locale.getDefault().language.startsWith("en")) {
+                        GlobalScope.launch(Dispatchers.Main) {
+                            val changelog = changelogManager.getChangelog()
+                            changelogManager.markChangelogSeen()
+                            view.showChangelog(changelog)
+                        }
+                    } else {
+                        changelogManager.markChangelogSeen()
+                    }
+                } else {
                     changelogManager.markChangelogSeen()
-                    view.showChangelog(changelog)
                 }
-            } else {
-                changelogManager.markChangelogSeen()
             }
-        } else {
-            changelogManager.markChangelogSeen()
-        }
 
         view.changelogMoreIntent.autoDisposable(view.scope())
             .subscribe { navigator.showChangelog() }
@@ -195,7 +208,29 @@ class MainViewModel @Inject constructor(
                     .takeUntil(view.activityResumedIntent.filter { resumed -> resumed })
             }.autoDisposable(view.scope()).subscribe()
 
-        view.composeIntent.autoDisposable(view.scope()).subscribe { navigator.showCompose() }
+        view.composeIntent
+            .withLatestFrom(state) { _, state -> state }
+            .autoDisposable(view.scope())
+            .subscribe { state ->
+                val selected = when (state.page) {
+                    is Inbox -> state.page.selected
+                    is Archived -> state.page.selected
+                    else -> 0
+                }
+                Log.d("QK-COMPOSE", "composeIntent statePage=${state.page::class.java.simpleName} selected=$selected")
+                when {
+                    state.page is Inbox && state.page.selected > 0 -> {
+                        Log.d("QK-COMPOSE", "composeIntent clearing inbox selection=${state.page.selected}")
+                        view.clearSelection()
+                    }
+                    state.page is Archived && state.page.selected > 0 -> {
+                        Log.d("QK-COMPOSE", "composeIntent clearing archived selection=${state.page.selected}")
+                        view.clearSelection()
+                    }
+                }
+                Log.d("QK-COMPOSE", "composeIntent launching compose")
+                navigator.showCompose()
+            }
 
         view.homeIntent.withLatestFrom(state) { _, state ->
                 when {
@@ -249,18 +284,17 @@ class MainViewModel @Inject constructor(
                     else -> Unit
                 }
             }.autoDisposable(view.scope()).subscribe()
-
         view.optionsItemIntent.filter { itemId -> itemId == R.id.archive }
-            .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
-                markArchived.execute(conversations)
-                view.clearSelection()
-            }.autoDisposable(view.scope()).subscribe()
-
-        view.optionsItemIntent.filter { itemId -> itemId == R.id.unarchive }
-            .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
-                markUnarchived.execute(conversations)
-                view.clearSelection()
-            }.autoDisposable(view.scope()).subscribe()
+            .withLatestFrom(state) { _, state -> state }
+            .withLatestFrom(view.conversationsSelectedIntent) { state, selection -> state to selection }
+            .autoDisposable(view.scope())
+            .subscribe { (state, selection) ->
+                if (state.page is Archived) {
+                    markUnarchived.execute(selection) { view.clearSelection() }
+                } else {
+                    markArchived.execute(selection) { view.clearSelection() }
+                }
+            }
 
         view.optionsItemIntent.filter { itemId -> itemId == R.id.delete }
             .filter { permissionManager.isDefaultSms().also { if (!it) view.requestDefaultSms() } }
@@ -278,40 +312,143 @@ class MainViewModel @Inject constructor(
             .doOnNext(navigator::addContact).autoDisposable(view.scope()).subscribe()
 
         view.optionsItemIntent.filter { itemId -> itemId == R.id.pin }
-            .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
-                markPinned.execute(conversations)
-                view.clearSelection()
-            }.autoDisposable(view.scope()).subscribe()
+            .withLatestFrom(view.conversationsSelectedIntent) { _, selection -> selection }
+            .autoDisposable(view.scope())
+            .subscribe { selection ->
+                val conversations = selection.mapNotNull(conversationRepo::getConversation)
+                val shouldPin = conversations.sumBy { if (it.pinned) -1 else 1 } >= 0
+                Log.d(
+                    "QK-PIN",
+                    "handler selection=$selection states=${conversations.map { "${it.id}:${it.pinned}" }} shouldPin=$shouldPin"
+                )
+                if (shouldPin) {
+                    markPinned.execute(selection) {
+                        Log.d("QK-PIN", "markPinned complete selection=$selection")
+                        view.clearSelection()
+                    }
+                } else {
+                    markUnpinned.execute(selection) {
+                        Log.d("QK-PIN", "markUnpinned complete selection=$selection")
+                        view.clearSelection()
+                    }
+                }
+            }
+
         view.optionsItemIntent.filter { itemId -> itemId == R.id.clear }
             .withLatestFrom(view.conversationsSelectedIntent) { _, _ ->
                 view.clearSelection()
             }.autoDisposable(view.scope()).subscribe()
 
-        view.optionsItemIntent.filter { itemId -> itemId == R.id.unpin }
-            .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
-                markUnpinned.execute(conversations)
-                view.clearSelection()
-            }.autoDisposable(view.scope()).subscribe()
-
-        view.optionsItemIntent.filter { itemId -> itemId == R.id.read }
+        view.optionsItemIntent.filter { itemId -> itemId == R.id.read || itemId == R.id.unread }
             .filter { permissionManager.isDefaultSms().also { if (!it) view.requestDefaultSms() } }
-            .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
-                markRead.execute(conversations)
-                view.clearSelection()
-            }.autoDisposable(view.scope()).subscribe()
-
-        view.optionsItemIntent.filter { itemId -> itemId == R.id.unread }
-            .filter { permissionManager.isDefaultSms().also { if (!it) view.requestDefaultSms() } }
-            .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
-                markUnread.execute(conversations)
-                view.clearSelection()
-            }.autoDisposable(view.scope()).subscribe()
+            .withLatestFrom(view.conversationsSelectedIntent) { _, selection -> selection }
+            .autoDisposable(view.scope())
+            .subscribe { selection ->
+                val conversations = selection.mapNotNull(conversationRepo::getConversation)
+                val shouldRead = conversations.sumBy { if (!it.unread) -1 else 1 } >= 0
+                if (shouldRead) {
+                    markRead.execute(selection) {
+                        view.clearSelection()
+                    }
+                } else {
+                    markUnread.execute(selection) {
+                        view.clearSelection()
+                    }
+                }
+            }
 
         view.optionsItemIntent.filter { itemId -> itemId == R.id.block }
             .withLatestFrom(view.conversationsSelectedIntent) { _, conversations ->
                 view.showBlockingDialog(conversations, true)
                 view.clearSelection()
             }.autoDisposable(view.scope()).subscribe()
+
+        view.conversationOptionActionIntent
+            .autoDisposable(view.scope())
+            .subscribe { (itemId, selection) ->
+                Log.d("QK-OPT", "direct action itemId=$itemId selection=$selection")
+                when (itemId) {
+                    R.id.archive -> {
+                        val currentState = state.blockingFirst()
+                        if (currentState.page is Archived) {
+                            markUnarchived.execute(selection) { view.clearSelection() }
+                        } else {
+                            markArchived.execute(selection) { view.clearSelection() }
+                        }
+                    }
+
+                    R.id.delete -> {
+                        if (!permissionManager.isDefaultSms()) {
+                            view.requestDefaultSms()
+                        } else {
+                            view.showDeleteDialog(selection)
+                        }
+                    }
+
+                    R.id.add -> {
+                        view.clearSelection()
+                        selection
+                            .takeIf { it.size == 1 }
+                            ?.firstOrNull()
+                            ?.let(conversationRepo::getConversation)
+                            ?.recipients
+                            ?.takeIf { recipients -> recipients.size == 1 }
+                            ?.firstOrNull()
+                            ?.address
+                            ?.let(navigator::addContact)
+                    }
+
+                    R.id.read, R.id.unread -> {
+                        if (!permissionManager.isDefaultSms()) {
+                            view.requestDefaultSms()
+                        } else {
+                            val conversations = selection.mapNotNull(conversationRepo::getConversation)
+                            val shouldRead = conversations.sumBy { if (!it.unread) -1 else 1 } >= 0
+                            if (shouldRead) {
+                                markRead.execute(selection) { view.clearSelection() }
+                            } else {
+                                markUnread.execute(selection) { view.clearSelection() }
+                            }
+                        }
+                    }
+
+                    R.id.block -> {
+                        view.showBlockingDialog(selection, true)
+                        view.clearSelection()
+                    }
+                }
+            }
+
+        view.muteConversationIntent
+            .autoDisposable(view.scope())
+            .subscribe { threadId ->
+                if (notificationManager.isConversationMuted(threadId)) {
+                    notificationManager.unmuteConversation(threadId)
+                } else {
+                    notificationManager.muteConversation(threadId)
+                }
+
+                updateSelectionState(listOf(threadId))
+                view.clearSelection()
+            }
+
+        view.pinConversationIntent
+            .autoDisposable(view.scope())
+            .subscribe { threadId ->
+                val conversation = conversationRepo.getConversation(threadId)
+                Log.d("QK-PIN", "direct handler threadId=$threadId pinnedBefore=${conversation?.pinned}")
+                if (conversation?.pinned == true) {
+                    markUnpinned.execute(listOf(threadId)) {
+                        Log.d("QK-PIN", "direct markUnpinned complete threadId=$threadId")
+                        updateSelectionState(listOf(threadId))
+                    }
+                } else {
+                    markPinned.execute(listOf(threadId)) {
+                        Log.d("QK-PIN", "direct markPinned complete threadId=$threadId")
+                        updateSelectionState(listOf(threadId))
+                    }
+                }
+            }
 
 //        view.plusBannerIntent.autoDisposable(view.scope()).subscribe {
 //                newState { copy(drawerOpen = false) }
@@ -325,31 +462,9 @@ class MainViewModel @Inject constructor(
 //
 //        view.dismissRatingIntent.autoDisposable(view.scope()).subscribe { ratingManager.dismiss() }
 
-        view.conversationsSelectedIntent.withLatestFrom(state) { selection, state ->
-                val conversations = selection.mapNotNull(conversationRepo::getConversation)
-                val add = conversations.firstOrNull()?.takeIf { conversations.size == 1 }
-                    ?.takeIf { conversation -> conversation.recipients.size == 1 }?.recipients?.first()
-                    ?.takeIf { recipient -> recipient.contact == null } != null
-                val pin = conversations.sumBy { if (it.pinned) -1 else 1 } >= 0
-                val read = conversations.sumBy { if (!it.unread) -1 else 1 } >= 0
-                val selected = selection.size
-
-                when (state.page) {
-                    is Inbox -> {
-                        val page = state.page.copy(
-                            addContact = add, markPinned = pin, markRead = read, selected = selected
-                        )
-                        newState { copy(page = page) }
-                    }
-
-                    is Archived -> {
-                        val page = state.page.copy(
-                            addContact = add, markPinned = pin, markRead = read, selected = selected
-                        )
-                        newState { copy(page = page) }
-                    }
-                }
-            }.autoDisposable(view.scope()).subscribe()
+        view.conversationsSelectedIntent.autoDisposable(view.scope()).subscribe { selection ->
+            updateSelectionState(selection)
+        }
 
         // Delete the conversation
         view.confirmDeleteIntent.autoDisposable(view.scope()).subscribe { conversations ->
@@ -388,4 +503,47 @@ class MainViewModel @Inject constructor(
             }.autoDisposable(view.scope()).subscribe()
     }
 
+    private fun updateSelectionState(selection: List<Long>) {
+        val conversations = selection.mapNotNull(conversationRepo::getConversation)
+        val add = conversations.firstOrNull()?.takeIf { conversations.size == 1 }
+            ?.takeIf { conversation -> conversation.recipients.size == 1 }?.recipients?.first()
+            ?.takeIf { recipient -> recipient.contact == null } != null
+        val muted = conversations.firstOrNull()
+            ?.takeIf { conversations.size == 1 }
+            ?.let { conversation -> notificationManager.isConversationMuted(conversation.id) }
+            ?: false
+        val pin = conversations.sumBy { if (it.pinned) -1 else 1 } >= 0
+        val read = conversations.sumBy { if (!it.unread) -1 else 1 } >= 0
+        val selected = selection.size
+
+        newState {
+            when (page) {
+                is Inbox -> {
+                    copy(
+                        page = page.copy(
+                            addContact = add,
+                            markMuted = muted,
+                            markPinned = pin,
+                            markRead = read,
+                            selected = selected
+                        )
+                    )
+                }
+
+                is Archived -> {
+                    copy(
+                        page = page.copy(
+                            addContact = add,
+                            markMuted = muted,
+                            markPinned = pin,
+                            markRead = read,
+                            selected = selected
+                        )
+                    )
+                }
+
+                else -> this
+            }
+        }
+    }
 }

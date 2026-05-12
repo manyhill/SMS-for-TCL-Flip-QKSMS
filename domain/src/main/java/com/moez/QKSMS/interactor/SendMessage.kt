@@ -45,22 +45,21 @@ class SendMessage @Inject constructor(
 
     override fun buildObservable(params: Params): Flowable<*> = Flowable.just(Unit)
             .filter { params.addresses.isNotEmpty() }
-            .doOnNext {
+            .map {
                 // If a threadId isn't provided, try to obtain one
-                val threadId = when (params.threadId) {
+                when (params.threadId) {
                     0L -> TelephonyCompat.getOrCreateThreadId(context, params.addresses.toSet())
                     else -> params.threadId
                 }
+            }
+            .doOnNext { threadId ->
                 messageRepo.sendMessage(params.subId, threadId, params.addresses, params.body, params.attachments,
                         params.delay)
             }
-            .mapNotNull {
-                // If the threadId wasn't provided, then it's probably because it doesn't exist in Realm.
-                // Sync it now and get the id
-                when (params.threadId) {
-                    0L -> conversationRepo.getOrCreateConversation(params.addresses)?.id
-                    else -> params.threadId
-                }
+            .mapNotNull { threadId ->
+                // If the thread didn't exist in Realm yet, create it using the exact provider thread id
+                // used for the send. Resolving again by address can race on newly-created threads.
+                conversationRepo.getOrCreateConversation(threadId)?.id ?: threadId.takeIf { it != 0L }
             }
             .doOnNext { threadId -> conversationRepo.updateConversations(threadId) }
             .doOnNext { threadId -> conversationRepo.markUnarchived(threadId) }

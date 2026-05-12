@@ -25,13 +25,11 @@
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:animateLayoutChanges="true">
+        android:layout_height="match_parent">
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             style="@style/Toolbar"
-            android:animateLayoutChanges="true"
 
             android:touchscreenBlocksFocus="false"
 
@@ -83,8 +81,11 @@
             android:layout_height="0dp"
             android:clipChildren="false"
             android:clipToPadding="false"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
             android:paddingTop="8dp"
             android:paddingBottom="8dp"
+            android:touchscreenBlocksFocus="false"
             app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintBottom_toTopOf="@id/linearLayout_compose"
@@ -111,7 +112,6 @@
             android:layout_height="wrap_content"
             app:layout_constraintBottom_toBottomOf="parent"
             android:background="@color/tools_theme"
-            android:elevation="8dp"
             android:orientation="horizontal"
             app:layout_constraintBottom_toTopOf="@id/bottom"
             app:layout_constraintEnd_toEndOf="parent"

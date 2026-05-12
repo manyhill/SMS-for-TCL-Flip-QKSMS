@@ -97,7 +97,9 @@ class QkReplyActivity : QkThemedActivity(), QkReplyView {
         toolbar.menu.findItem(R.id.expand)?.isVisible = !state.expanded
         toolbar.menu.findItem(R.id.collapse)?.isVisible = state.expanded
 
-        adapter.data = state.data
+        // Was: adapter.data = state.data  (setter is private)
+        // Now: route through MessagesAdapter API; it will forward the RealmResults to updateData(...)
+        adapter.threadData = state.data
 
         counter.text = state.remaining
         counter.setVisible(counter.text.isNotBlank())
@@ -128,5 +130,4 @@ class QkReplyActivity : QkThemedActivity(), QkReplyView {
         black -> R.style.AppThemeDialog_Black
         else -> R.style.AppThemeDialog
     }
-
 }

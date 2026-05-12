@@ -46,6 +46,12 @@
     <color name="bubbleLight">#ECEFF1</color>
     <color name="bubbleDark">#11171B</color>
     <color name="bubbleBlack">#0F1113</color>
+    <color name="threadBubbleIncoming">#F2F4F7</color>
+    <color name="threadBubbleIncomingSelected">#E6EAF2</color>
+    <color name="threadBubbleOutgoing">#D6DFFF</color>
+    <color name="threadBubbleOutgoingSelected">#BCCBFF</color>
+    <color name="threadBubbleText">#101418</color>
+    <color name="threadSurface">#FFFFFF</color>
 
     <color name="separatorLight">#0C000000</color>
     <color name="separatorDark">#1AFFFFFF</color>

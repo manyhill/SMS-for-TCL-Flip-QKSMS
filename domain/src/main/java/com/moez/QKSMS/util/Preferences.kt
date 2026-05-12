@@ -115,6 +115,9 @@ class Preferences @Inject constructor(
     val unicode = rxPrefs.getBoolean("unicode", false)
     val mobileOnly = rxPrefs.getBoolean("mobileOnly", false)
     val autoDelete = rxPrefs.getInteger("autoDelete", 0)
+    val autoBackup = rxPrefs.getInteger("autoBackup", 0)
+    val lastAutoBackup = rxPrefs.getLong("lastAutoBackup", 0L)
+    val backupDirectory = rxPrefs.getString("backupDirectory", "")
     val longAsMms = rxPrefs.getBoolean("longAsMms", false)
     val mmsSize = rxPrefs.getInteger("mmsSize", 300)
     val logging = rxPrefs.getBoolean("logging", false)
@@ -201,6 +204,13 @@ class Preferences @Inject constructor(
         return when (threadId) {
             0L -> default
             else -> rxPrefs.getString("ringtone_$threadId", default.get())
+        }
+    }
+
+    fun notificationChannelVersion(threadId: Long = 0): Preference<Int> {
+        return when (threadId) {
+            0L -> rxPrefs.getInteger("notification_channel_version", 1)
+            else -> rxPrefs.getInteger("notification_channel_version_$threadId", 1)
         }
     }
 }

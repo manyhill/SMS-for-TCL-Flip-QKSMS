@@ -29,6 +29,11 @@ import io.reactivex.subjects.Subject
 
 interface ComposeView : QkView<ComposeState> {
 
+    data class MessageOptionAction(
+        val itemId: Int,
+        val messageIds: List<Long>
+    )
+
     val activityVisibleIntent: Observable<Boolean>
     val chipsSelectedIntent: Subject<HashMap<String, String?>>
     val chipDeletedIntent: Subject<Recipient>
@@ -38,9 +43,12 @@ interface ComposeView : QkView<ComposeState> {
     val messageClickIntent: Subject<Long>
     val messagePartClickIntent: Subject<Long>
     val messagesSelectedIntent: Observable<List<Long>>
+    val messageOptionsSelectionIntent: Observable<List<Long>>
+    val messageOptionActionIntent: Observable<MessageOptionAction>
     val cancelSendingIntent: Subject<Long>
     val attachmentDeletedIntent: Subject<Attachment>
     val textChangedIntent: Observable<CharSequence>
+    val searchQueryIntent: Observable<String>
     val attachIntent: Observable<Unit>
     val cameraIntent: Observable<*>
     val galleryIntent: Observable<*>
@@ -63,7 +71,8 @@ interface ComposeView : QkView<ComposeState> {
     fun requestDefaultSms()
     fun requestStoragePermission()
     fun requestSmsPermission()
-    fun showContacts(sharing: Boolean, chips: List<Recipient>)
+    fun showContacts(sharing: Boolean, chips: List<Recipient>, singleRecipient: Boolean = false)
+    fun showSelectedRecipients(chips: List<Recipient>)
     fun themeChanged()
     fun showKeyboard()
     fun requestCamera()
@@ -76,12 +85,16 @@ interface ComposeView : QkView<ComposeState> {
     fun requestDatePicker()
     fun requestContact()
     fun initPhotoMenu()
+    fun initAudioMenu()
     fun initVideoMenu()
     fun initSecondMenu()
+    fun initMoreMenu()
     fun pasteText()
     fun setDraft(draft: String)
+    fun getDraft(): CharSequence
     fun scrollToMessage(id: Long)
     fun showQksmsPlusSnackbar(@StringRes message: Int)
-     fun showContactsDialog(contacts: MutableList<String>)
+    fun showContactsDialog(contacts: MutableList<String>)
+    fun showRecipientsDialog(recipients: List<Recipient>)
 
 }

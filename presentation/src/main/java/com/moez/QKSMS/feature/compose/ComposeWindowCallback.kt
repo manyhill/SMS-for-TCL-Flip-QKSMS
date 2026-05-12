@@ -33,6 +33,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import androidx.annotation.RequiresApi
 import com.moez.QKSMS.feature.compose.editing.DetailedChipView
+import timber.log.Timber
 
 class ComposeWindowCallback(
     private val localCallback: Window.Callback,
@@ -40,6 +41,20 @@ class ComposeWindowCallback(
 ) : Window.Callback {
 
     override fun dispatchKeyEvent(keyEvent: KeyEvent): Boolean {
+        if (keyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
+            Timber.d(
+                "ComposeWindowCallback dispatchKeyEvent action=%s repeat=%s activity=%s focus=%s",
+                keyEvent.action,
+                keyEvent.repeatCount,
+                activity::class.java.simpleName,
+                activity.currentFocus?.javaClass?.simpleName ?: "null"
+            )
+            (activity as? ComposeActivity)?.handleWindowBackKeyEvent(keyEvent)?.let { handled ->
+                if (handled) {
+                    return true
+                }
+            }
+        }
         return localCallback.dispatchKeyEvent(keyEvent)
     }
 

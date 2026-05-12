@@ -30,9 +30,9 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:gravity="center"
-        android:padding="6dp"
+        android:padding="2dp"
         android:textAllCaps="true"
-        app:autoSizeMaxTextSize="22sp"
+        app:autoSizeMaxTextSize="18sp"
         app:autoSizeTextType="uniform" />
 
     <ImageView

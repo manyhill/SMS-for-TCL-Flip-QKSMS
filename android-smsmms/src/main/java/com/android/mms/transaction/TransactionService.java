@@ -51,6 +51,9 @@ import com.klinker.android.send_message.BroadcastUtils;
 import com.klinker.android.send_message.R;
 import com.klinker.android.send_message.Utils;
 import timber.log.Timber;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -118,7 +121,9 @@ public class TransactionService extends Service implements Observer {
      * Allowed values for this key are any valid content uri.
      */
     public static final String STATE_URI = "uri";
-
+    private ConnectivityManager.NetworkCallback mMmsCb;
+    private Network mMmsNetwork;
+    private boolean mMmsRequested = false;
     private static final int EVENT_TRANSACTION_REQUEST = 1;
     private static final int EVENT_CONTINUE_MMS_CONNECTIVITY = 3;
     private static final int EVENT_HANDLE_NEXT_PENDING_TRANSACTION = 4;
@@ -508,46 +513,106 @@ public class TransactionService extends Service implements Observer {
 
     protected int beginMmsConnectivity() throws IOException {
         Timber.v("beginMmsConnectivity");
-        // Take a wake lock so we don't fall asleep before the message is downloaded.
+
+        // Keep the CPU on while we set up the MMS network
         createWakeLock();
 
+        // If you allow MMS over Wi-Fi and Wi-Fi is connected, just proceed
         if (Utils.isMmsOverWifiEnabled(this)) {
             NetworkInfo niWF = mConnMgr.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
-            if ((niWF != null) && (niWF.isConnected())) {
+            if (niWF != null && niWF.isConnected()) {
                 Timber.v("beginMmsConnectivity: Wifi active");
-                return 0;
+                acquireWakeLock();
+                return 0; // "already active"
             }
         }
 
-        int result = mConnMgr.startUsingNetworkFeature(ConnectivityManager.TYPE_MOBILE, "enableMMS");
-
-        Timber.v("beginMmsConnectivity: result=" + result);
-
-        switch (result) {
-            case 0:
-            case 1:
-                acquireWakeLock();
-                return result;
+        // If we already have an MMS network bound, consider it active
+        if (mMmsNetwork != null) {
+            Timber.v("beginMmsConnectivity: MMS network already active");
+            acquireWakeLock();
+            return 0; // "already active"
         }
 
-        throw new IOException("Cannot establish MMS connectivity");
+        // If a request is in flight, just report "request started"
+        if (mMmsRequested) {
+            Timber.v("beginMmsConnectivity: request already in flight");
+            acquireWakeLock();
+            return 1; // "request started"
+        }
+
+        // Build a request for cellular MMS
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_MMS)
+                .build();
+
+        mMmsRequested = true;
+
+        mMmsCb = new ConnectivityManager.NetworkCallback() {
+            @Override public void onAvailable(Network network) {
+                Timber.v("MMS network onAvailable: " + network);
+                // Bind process to this network while doing MMS work
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    mConnMgr.bindProcessToNetwork(network);
+                } else {
+                    ConnectivityManager.setProcessDefaultNetwork(network);
+                }
+                mMmsNetwork = network;
+                // NOTE: We still rely on your existing ConnectivityBroadcastReceiver
+                // to notice TYPE_MOBILE_MMS connected and call processPendingTransaction.
+            }
+
+            @Override public void onLost(Network network) {
+                Timber.v("MMS network onLost: " + network);
+                if (mMmsNetwork != null && mMmsNetwork.equals(network)) {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        mConnMgr.bindProcessToNetwork(null);
+                    } else {
+                        ConnectivityManager.setProcessDefaultNetwork(null);
+                    }
+                    mMmsNetwork = null;
+                }
+            }
+        };
+
+        // Kick off the request (60s timeout to mirror the old behavior)
+        mConnMgr.requestNetwork(request, mMmsCb, 60_000);
+
+        acquireWakeLock();
+        return 1; // "request started" — your existing code will queue the txn
     }
+
 
     protected void endMmsConnectivity() {
         try {
             Timber.v("endMmsConnectivity");
 
-            // cancel timer for renewal of lease
+            // cancel timer for renewal
             mServiceHandler.removeMessages(EVENT_CONTINUE_MMS_CONNECTIVITY);
-            if (mConnMgr != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-                mConnMgr.stopUsingNetworkFeature(
-                        ConnectivityManager.TYPE_MOBILE,
-                        "enableMMS");
+
+            if (mConnMgr != null) {
+                // Unbind from MMS network if bound
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    mConnMgr.bindProcessToNetwork(null);
+                } else {
+                    ConnectivityManager.setProcessDefaultNetwork(null);
+                }
+
+                // Stop listening if we requested it
+                if (mMmsCb != null) {
+                    try { mConnMgr.unregisterNetworkCallback(mMmsCb); } catch (Exception ignored) {}
+                    mMmsCb = null;
+                }
+
+                mMmsNetwork = null;
+                mMmsRequested = false;
             }
         } finally {
             releaseWakeLock();
         }
     }
+
 
     private final class ServiceHandler extends Handler {
         public ServiceHandler(Looper looper) {

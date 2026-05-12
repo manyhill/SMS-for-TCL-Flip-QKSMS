@@ -18,7 +18,7 @@
   -->
 <resources>
 
-    <string name="app_name" translatable="false">Messaging</string>
+    <string name="app_name" translatable="false">Messages</string>
 
     <string name="shortcut_compose_long_label">New conversation</string>
     <string name="shortcut_compose_short_label">Compose</string>
@@ -35,7 +35,19 @@
     <string name="setup_skip">Skip</string>
     <string name="setup_next">Continue</string>
 
-    <string name="menu_add_person">Add person</string>
+    <string name="menu_add_person">Edit recipients</string>
+    <string name="menu_view_recipients">View recipients</string>
+    <string name="menu_more_ellipsis">More...</string>
+    <string name="main_menu_select_multiple">Select multiple</string>
+    <plurals name="conversations_selected_toast">
+        <item quantity="one">%d conversation selected</item>
+        <item quantity="other">%d conversations selected</item>
+    </plurals>
+    <string name="compose_menu_search">Search</string>
+    <plurals name="contacts_selected_toast">
+        <item quantity="one">%d contact selected</item>
+        <item quantity="other">%d contacts selected</item>
+    </plurals>
     <string name="menu_call">Call</string>
     <string name="menu_info">Details</string>
     <string name="menu_save">Save to gallery</string>
@@ -48,6 +60,8 @@
     <string name="main_menu_unarchive">Unarchive</string>
     <string name="main_menu_delete">Delete</string>
     <string name="main_menu_add_contact">Add to contacts</string>
+    <string name="main_menu_mute">Mute</string>
+    <string name="main_menu_unmute">Unmute</string>
     <string name="main_menu_pin">Pin to top</string>
     <string name="main_menu_unpin">Unpin</string>
     <string name="main_menu_read">Mark read</string>
@@ -117,6 +131,8 @@
     <string name="compose_menu_copy">Copy text</string>
     <string name="compose_menu_forward">Forward</string>
     <string name="compose_menu_delete">Delete</string>
+    <string name="compose_menu_mute">Mute</string>
+    <string name="compose_menu_unmute">Unmute</string>
     <string name="compose_menu_previous">Previous</string>
     <string name="compose_menu_next">Next</string>
     <string name="compose_menu_clear">Clear</string>
@@ -139,6 +155,33 @@
     <string name="compose_paste">Paste Text</string>
     <string name="compose_contact_error">Error reading contact</string>
     <string name="compose_audio_cd">Attach audio</string>
+    <string name="compose_audio_record_cd">Record audio</string>
+    <string name="compose_audio_recording_message">Recording in progress. Choose Stop recording when you are done.</string>
+    <string name="compose_audio_record_ready_message">Recording is ready. Choose Attach to add it to the message, or Cancel to discard it.</string>
+    <string name="compose_audio_record_idle_message">Choose Start recording to begin a new audio recording.</string>
+    <string name="compose_audio_record_error">Couldn\'t record audio</string>
+    <string name="compose_audio_permission_denied">Microphone permission is required to record audio</string>
+    <string name="compose_attach_action">Attach</string>
+    <string name="compose_audio_start_action">Start recording</string>
+    <string name="compose_audio_stop_action">Stop recording</string>
+    <string name="compose_audio_record_idle_compact">Tap mic</string>
+    <string name="compose_audio_recording_compact">Recording</string>
+    <string name="compose_audio_record_ready_compact">Attach</string>
+    <string name="audio_message_label">Audio message</string>
+    <string name="audio_message_progress_format">%1$s / %2$s</string>
+    <string name="compose_attachment_option_play">Play</string>
+    <string name="compose_attachment_option_remove">Remove</string>
+    <string name="compose_attachment_play">Play attachment</string>
+    <string name="compose_attachment_play_numbered">Play attachment %1$d</string>
+    <string name="compose_attachment_remove">Remove attachment</string>
+    <string name="compose_attachment_remove_numbered">Remove attachment %1$d</string>
+    <string name="compose_attachment_remove_all">Remove all attachments</string>
+    <string name="compose_attachment_menu_title">Attachment</string>
+    <string name="compose_attachment_play_short">Play</string>
+    <string name="compose_attachment_play_numbered_short">Play %1$d</string>
+    <string name="compose_attachment_remove_short">Remove</string>
+    <string name="compose_attachment_remove_numbered_short">Remove %1$d</string>
+    <string name="compose_attachment_remove_all_short">Remove all</string>
     <string name="compose_video_cd">Attach a video</string>
     <string name="compose_video_record_cd">Take a video</string>
     <!-- Example: SIM 1 (Verizon) selected-->
@@ -187,7 +230,21 @@
         <item quantity="one">%d message</item>
         <item quantity="other">%d messages</item>
     </plurals>
-    <string name="backup_disclaimer">Currently, only SMS is supported by Backup and Restore. MMS support and scheduled backups will be coming soon!</string>
+    <string name="backup_auto_title">Automatic backup</string>
+    <string name="backup_auto_never">Never</string>
+    <string name="backup_auto_summary">Every %d days</string>
+    <string name="backup_auto_dialog_title">Automatic backup</string>
+    <string name="backup_auto_dialog_message">Back up text messages automatically.</string>
+    <string name="backup_auto_picker_days">Days</string>
+    <string name="backup_location_title">Backup location</string>
+    <string name="backup_location_dialog_title">Backup location</string>
+    <string name="backup_location_dialog_message">Enter a folder path for backup files.</string>
+    <string name="backup_location_dialog_hint">Folder path</string>
+    <string name="backup_location_selected">Selected folder</string>
+    <string name="backup_location_picker_unavailable">No folder picker is available on this device. Backups will use the default folder.</string>
+    <string name="backup_location_permission_failed">Could not keep permission for this backup folder.</string>
+    <string name="backup_location_default" translatable="false">/QKSMS/Backups</string>
+    <string name="backup_disclaimer">Currently, only SMS text is supported by Backup and Restore. MMS media backup is not included yet.</string>
     <string name="backup_now">Backup now</string>
     <string name="backup_progress_parsing">Parsing backup…</string>
     <string name="backup_progress_running">%d/%d messages</string>
@@ -420,6 +477,8 @@
 
     <string name="toast_copied">Copied</string>
     <string name="toast_archived">Archived conversation</string>
+    <string name="toast_conversation_muted">Conversation muted</string>
+    <string name="toast_conversation_unmuted">Conversation unmuted</string>
     <string name="toast_qksms_plus">You must unlock QKSMS+ to use this</string>
 
     <plurals name="notification_new_messages">
@@ -433,6 +492,7 @@
     <string name="send">Send</string>
     <string name="attach">Attach</string>
     <string name="message_options">Message options</string>
+    <string name="thread_options">Thread options</string>
     <string name="forward_message">Forward Message</string>
     <string name="copy_message_text">Copy Message Text</string>
     <string name="message_info">Message Info</string>

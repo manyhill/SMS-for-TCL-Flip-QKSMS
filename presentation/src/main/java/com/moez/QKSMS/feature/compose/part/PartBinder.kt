@@ -43,4 +43,10 @@ abstract class PartBinder {
         canGroupWithNext: Boolean
     )
 
+    open fun performClick(part: MmsPart, holder: QkViewHolder): Boolean = false
+
+    open fun onViewRecycled(holder: QkViewHolder) = Unit
+
+    open fun onDetachedFromRecyclerView() = Unit
+
 }

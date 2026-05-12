@@ -28,10 +28,13 @@ import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.Telephony
 import android.provider.Telephony.Mms
 import android.provider.Telephony.Sms
 import android.telephony.SmsManager
+import android.widget.Toast
 import android.webkit.MimeTypeMap
 import androidx.core.content.contentValuesOf
 import com.google.android.mms.ContentType
@@ -70,6 +73,11 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.sqrt
+import com.moez.QKSMS.util.RealmProvider
+
+private const val SAFE_MMS_PAYLOAD_BYTES = 600 * 1024
+private const val DEFAULT_MMS_PAYLOAD_BYTES = 300 * 1024
+private const val MMS_COMPRESSION_HEADROOM = 0.9
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -82,7 +90,7 @@ class MessageRepositoryImpl @Inject constructor(
 ) : MessageRepository {
 
     override fun getMessages(threadId: Long, query: String): RealmResults<Message> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .where(Message::class.java)
             .equalTo("threadId", threadId)
             .let {
@@ -100,8 +108,30 @@ class MessageRepositoryImpl @Inject constructor(
             .findAllAsync()
     }
 
+    override fun getRecentMessages(threadId: Long, limit: Long): RealmResults<Message> {
+        val realm = RealmProvider.get()
+        val cutoffDate = realm.where(Message::class.java)
+            .equalTo("threadId", threadId)
+            .sort("date", Sort.DESCENDING)
+            .limit(limit)
+            .findAll()
+            .lastOrNull()
+            ?.date
+
+        return realm.where(Message::class.java)
+            .equalTo("threadId", threadId)
+            .let { query ->
+                when (cutoffDate) {
+                    null -> query
+                    else -> query.greaterThanOrEqualTo("date", cutoffDate)
+                }
+            }
+            .sort("date")
+            .findAllAsync()
+    }
+
     override fun getMessage(id: Long): Message? {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .also { realm -> realm.refresh() }
             .where(Message::class.java)
             .equalTo("id", id)
@@ -109,14 +139,14 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override fun getMessageForPart(id: Long): Message? {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .where(Message::class.java)
             .equalTo("parts.id", id)
             .findFirst()
     }
 
     override fun getLastIncomingMessage(threadId: Long): RealmResults<Message> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .where(Message::class.java)
             .equalTo("threadId", threadId)
             .beginGroup()
@@ -146,14 +176,14 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override fun getPart(id: Long): MmsPart? {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .where(MmsPart::class.java)
             .equalTo("id", id)
             .findFirst()
     }
 
     override fun getPartsForConversation(threadId: Long): RealmResults<MmsPart> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .where(MmsPart::class.java)
             .equalTo("messages.threadId", threadId)
             .beginGroup()
@@ -211,7 +241,7 @@ class MessageRepositoryImpl @Inject constructor(
      * for a given conversation
      */
     override fun getUnreadUnseenMessages(threadId: Long): RealmResults<Message> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .also { it.refresh() }
             .where(Message::class.java)
             .equalTo("seen", false)
@@ -222,7 +252,7 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override fun getUnreadMessages(threadId: Long): RealmResults<Message> {
-        return Realm.getDefaultInstance()
+        return RealmProvider.get()
             .where(Message::class.java)
             .equalTo("read", false)
             .equalTo("threadId", threadId)
@@ -231,14 +261,14 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override fun markAllSeen() {
-        val realm = Realm.getDefaultInstance()
+        val realm = RealmProvider.get()
         val messages = realm.where(Message::class.java).equalTo("seen", false).findAll()
         realm.executeTransaction { messages.forEach { message -> message.seen = true } }
         realm.close()
     }
 
     override fun markSeen(threadId: Long) {
-        val realm = Realm.getDefaultInstance()
+        val realm = RealmProvider.get()
         val messages = realm.where(Message::class.java)
             .equalTo("threadId", threadId)
             .equalTo("seen", false)
@@ -361,14 +391,19 @@ class MessageRepositoryImpl @Inject constructor(
                 smsManager.carrierConfigValues.getInt(SmsManager.MMS_CONFIG_MAX_IMAGE_HEIGHT)
                     .takeIf { prefs.mmsSize.get() == -1 } ?: Int.MAX_VALUE
 
-            val carrierLimit = 5000000 //smsManager.carrierConfigValues.getInt(SmsManager.MMS_CONFIG_MAX_MESSAGE_SIZE)
+            val carrierLimit = smsManager.carrierConfigValues
+                .getInt(SmsManager.MMS_CONFIG_MAX_MESSAGE_SIZE)
+                .takeIf { it > 0 }
+                ?: DEFAULT_MMS_PAYLOAD_BYTES
+
+            val maxPayloadBytes = minOf(carrierLimit, SAFE_MMS_PAYLOAD_BYTES)
 
 
             val compressionLimit = when (prefs.mmsSize.get()) {
-                -1 -> carrierLimit
-                0 -> Int.MAX_VALUE
-                else -> prefs.mmsSize.get() * 1024
-            } * 0.9 // Ugly, but buys us a bit of wiggle room
+                -1 -> maxPayloadBytes
+                0 -> maxPayloadBytes
+                else -> minOf(prefs.mmsSize.get() * 1024, maxPayloadBytes)
+            } * MMS_COMPRESSION_HEADROOM // Leave room for MMS headers/SMIL.
 
             var bytesUsed = 0.0
 
@@ -388,6 +423,10 @@ class MessageRepositoryImpl @Inject constructor(
                     bytesUsed += vCard.size
                     MMSPart("contact", ContentType.TEXT_VCARD, vCard)
                 }
+            if (bytesUsed > compressionLimit) {
+                Timber.w("MMS text/contact payload of ${bytesUsed.toInt() / 1024}Kb exceeds ${compressionLimit.toInt() / 1024}Kb limit.")
+                hasNotSkippedAttachment = false
+            }
 
             val videoBytesByAttachment = attachments
                 .mapNotNull { attachment -> attachment as? Attachment.Video }
@@ -400,11 +439,11 @@ class MessageRepositoryImpl @Inject constructor(
 
             videoBytesByAttachment.forEach { (attachment, bytes) ->
                 val contentType: String = attachment.getContentType(context) ?: return@forEach
-                if (bytes.size < carrierLimit - bytesUsed) {
+                if (bytes.size <= compressionLimit - bytesUsed) {
                     parts += MMSPart("video", contentType, bytes)
                     bytesUsed += bytes.size
                 } else {
-                    Timber.w("Video file of ${bytes.size / 1024}Kb cannot be sent in ${(carrierLimit - bytesUsed).toInt() / 1024}Kb remaining space.")
+                    Timber.w("Video file of ${bytes.size / 1024}Kb cannot be sent in ${(compressionLimit - bytesUsed).toInt() / 1024}Kb remaining space.")
                     hasNotSkippedAttachment = false
                 }
             }
@@ -421,12 +460,12 @@ class MessageRepositoryImpl @Inject constructor(
             fileBytesByAttachment.forEach { (attachment, bytes) ->
                 val contentType: String = attachment.getContentType(context) ?: return@forEach
                 if (contentType.let(ContentType::isSupportedAudioType)) {
-                    if (bytes.size < carrierLimit - bytesUsed) {
+                    if (bytes.size <= compressionLimit - bytesUsed) {
                         parts += MMSPart(attachment.getName(context)
                             ?: "Attachment", contentType, bytes)
                         bytesUsed += bytes.size
                     } else {
-                        Timber.w("File of ${bytes.size / 1024}Kb cannot be sent in ${(carrierLimit - bytesUsed).toInt() / 1024}Kb remaining space.")
+                        Timber.w("File of ${bytes.size / 1024}Kb cannot be sent in ${(compressionLimit - bytesUsed).toInt() / 1024}Kb remaining space.")
                         hasNotSkippedAttachment = false
                     }
                 }
@@ -469,6 +508,8 @@ class MessageRepositoryImpl @Inject constructor(
                         val scale = maxBytes / originalBytes.size * (0.9 - attempts * 0.2)
                         if (scale <= 0) {
                             Timber.w("Failed to compress ${originalBytes.size / 1024}Kb to ${maxBytes.toInt() / 1024}Kb")
+                            hasNotSkippedAttachment = false
+                            imageBytesByAttachment[attachment] = byteArrayOf()
                             return@forEach
                         }
 
@@ -497,6 +538,7 @@ class MessageRepositoryImpl @Inject constructor(
             }
 
             imageBytesByAttachment.forEach { (attachment, bytes) ->
+                if (bytes.isEmpty()) return@forEach
                 parts += when (attachment.isGif(context)) {
                     true -> MMSPart("image", ContentType.IMAGE_GIF, bytes)
                     false -> MMSPart("image", ContentType.IMAGE_JPEG, bytes)
@@ -508,6 +550,10 @@ class MessageRepositoryImpl @Inject constructor(
             val recipients = addresses.map(phoneNumberUtils::normalizeNumber)
             if (parts.isNotEmpty() && hasNotSkippedAttachment) {
                 transaction.sendNewMessage(subId, threadId, recipients, parts, null, null)
+            } else if (!hasNotSkippedAttachment) {
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Attachment too large for MMS", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -608,7 +654,6 @@ class MessageRepositoryImpl @Inject constructor(
         date: Long
     ): Message {
 
-        // Insert the message to Realm
         val message = Message().apply {
             this.threadId = threadId
             this.address = address
@@ -622,11 +667,7 @@ class MessageRepositoryImpl @Inject constructor(
             read = true
             seen = true
         }
-        val realm = Realm.getDefaultInstance()
-        var managedMessage: Message? = null
-        realm.executeTransaction { managedMessage = realm.copyToRealmOrUpdate(message) }
 
-        // Insert the message to the native content provider
         val values = contentValuesOf(
             Sms.ADDRESS to address,
             Sms.BODY to body,
@@ -641,21 +682,24 @@ class MessageRepositoryImpl @Inject constructor(
             values.put(Sms.SUBSCRIPTION_ID, message.subId)
         }
 
-        val uri = context.contentResolver.insert(Sms.CONTENT_URI, values)
+        var uri: android.net.Uri? = null
 
-        // Update the contentId after the message has been inserted to the content provider
-        // The message might have been deleted by now, so only proceed if it's valid
-        //
-        // We do this after inserting the message because it might be slow, and we want the message
-        // to be inserted into Realm immediately. We don't need to do this after receiving one
-        uri?.lastPathSegment?.toLong()?.let { id ->
-            realm.executeTransaction { managedMessage?.takeIf { it.isValid }?.contentId = id }
+        Realm.getDefaultInstance().use { realm ->
+            var managedMessage: Message? = null
+
+            realm.executeTransaction {
+                managedMessage = realm.copyToRealmOrUpdate(message)
+            }
+
+            uri = context.contentResolver.insert(Sms.CONTENT_URI, values)
+
+            uri?.lastPathSegment?.toLongOrNull()?.let { contentId ->
+                realm.executeTransaction {
+                    managedMessage?.takeIf { it.isValid }?.contentId = contentId
+                }
+            }
         }
-        realm.close()
 
-        // On some devices, we can't obtain a threadId until after the first message is sent in a
-        // conversation. In this case, we need to update the message's threadId after it gets added
-        // to the native ContentProvider
         if (threadId == 0L) {
             uri?.let(syncRepository::syncMessage)
         }
@@ -684,9 +728,11 @@ class MessageRepositoryImpl @Inject constructor(
             type = "sms"
             read = activeConversationManager.getActiveConversation() == threadId
         }
-        val realm = Realm.getDefaultInstance()
-        var managedMessage: Message? = null
-        realm.executeTransaction { managedMessage = realm.copyToRealmOrUpdate(message) }
+        Realm.getDefaultInstance().use { realm ->
+            var managedMessage: Message? = null
+            realm.executeTransaction {
+                managedMessage = realm.copyToRealmOrUpdate(message)
+            }
 
         // Insert the message to the native content provider
         val values = contentValuesOf(
@@ -699,13 +745,16 @@ class MessageRepositoryImpl @Inject constructor(
             values.put(Sms.SUBSCRIPTION_ID, message.subId)
         }
 
-        context.contentResolver.insert(Sms.Inbox.CONTENT_URI, values)?.lastPathSegment?.toLong()
-            ?.let { id ->
-                // Update the contentId after the message has been inserted to the content provider
-                realm.executeTransaction { managedMessage?.contentId = id }
-            }
+            context.contentResolver.insert(Sms.Inbox.CONTENT_URI, values)
+                ?.lastPathSegment
+                ?.toLongOrNull()
+                ?.let { contentId ->
+                    realm.executeTransaction {
+                        managedMessage?.takeIf { it.isValid }?.contentId = contentId
+                    }
+                }
+        }
 
-        realm.close()
 
         return message
     }

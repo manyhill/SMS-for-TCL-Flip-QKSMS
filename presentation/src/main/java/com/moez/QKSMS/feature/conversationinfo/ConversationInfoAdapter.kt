@@ -1,6 +1,7 @@
 package com.moez.QKSMS.feature.conversationinfo
 
 import android.content.Context
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.core.view.isVisible
@@ -54,6 +55,39 @@ class ConversationInfoAdapter @Inject constructor(
                 theme.setOnClickListener {
                     val item = getItem(adapterPosition) as? ConversationInfoRecipient
                     item?.value?.id?.run(themeClicks::onNext)
+                }
+
+                add.setOnClickListener {
+                    val item = getItem(adapterPosition) as? ConversationInfoRecipient
+                    item?.value?.id?.run(recipientClicks::onNext)
+                }
+
+                itemView.setOnKeyListener { _, keyCode, event ->
+                    if (event.action != KeyEvent.ACTION_DOWN) {
+                        return@setOnKeyListener false
+                    }
+
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        when {
+                            add.visibility == ViewGroup.VISIBLE && add.isFocusable -> add.requestFocus()
+                            theme.isFocusable -> theme.requestFocus()
+                            else -> false
+                        }
+                    } else {
+                        false
+                    }
+                }
+
+                add.setOnKeyListener { _, keyCode, event ->
+                    event.action == KeyEvent.ACTION_DOWN &&
+                        keyCode == KeyEvent.KEYCODE_DPAD_LEFT &&
+                        itemView.requestFocus()
+                }
+
+                theme.setOnKeyListener { _, keyCode, event ->
+                    event.action == KeyEvent.ACTION_DOWN &&
+                        keyCode == KeyEvent.KEYCODE_DPAD_LEFT &&
+                        itemView.requestFocus()
                 }
             }
 

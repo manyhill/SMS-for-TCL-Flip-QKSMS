@@ -19,13 +19,13 @@
 package com.moez.QKSMS.feature.conversations
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.core.text.bold
 import androidx.core.text.buildSpannedString
 import androidx.core.text.color
-import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
@@ -34,9 +34,11 @@ import com.moez.QKSMS.common.base.QkViewHolder
 import com.moez.QKSMS.common.util.Colors
 import com.moez.QKSMS.common.util.DateFormatter
 import com.moez.QKSMS.common.util.extensions.resolveThemeColor
-import com.moez.QKSMS.common.util.extensions.setTint
+import com.moez.QKSMS.manager.NotificationManager
 import com.moez.QKSMS.model.Conversation
 import com.moez.QKSMS.util.PhoneNumberUtils
+import io.reactivex.subjects.PublishSubject
+import io.reactivex.subjects.Subject
 import kotlinx.android.synthetic.main.conversation_list_item.*
 import kotlinx.android.synthetic.main.conversation_list_item.view.*
 import javax.inject.Inject
@@ -46,8 +48,13 @@ class ConversationsAdapter @Inject constructor(
     private val context: Context,
     private val dateFormatter: DateFormatter,
     private val navigator: Navigator,
+    private val notificationManager: NotificationManager,
     private val phoneNumberUtils: PhoneNumberUtils
 ) : QkRealmAdapter<Conversation>() {
+
+    val rowFocused: Subject<Long> = PublishSubject.create()
+    val rowLongClicks: Subject<Long> = PublishSubject.create()
+    var multipleSelectionEnabled = false
 
     init {
         // This is how we access the threadId for the swipe actions
@@ -74,17 +81,31 @@ class ConversationsAdapter @Inject constructor(
         }
 
         return QkViewHolder(view).apply {
+            view.setOnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) {
+                    getItem(adapterPosition)?.let { conversation -> rowFocused.onNext(conversation.id) }
+                }
+            }
             view.setOnClickListener {
                 val conversation = getItem(adapterPosition) ?: return@setOnClickListener
-                when (toggleSelection(conversation.id, false)) {
+                when (toggleSelection(conversation.id, force = false, allowAdding = multipleSelectionEnabled)) {
                     true -> view.isActivated = isSelected(conversation.id)
-                    false -> navigator.showConversation(conversation.id)
+                    false -> {
+                        if (!hasSelection()) {
+                            navigator.showConversation(conversation.id)
+                        }
+                    }
                 }
             }
             view.setOnLongClickListener {
                 val conversation = getItem(adapterPosition) ?: return@setOnLongClickListener true
-                toggleSelection(conversation.id)
-                view.isActivated = isSelected(conversation.id)
+                if (multipleSelectionEnabled) {
+                    toggleSelection(conversation.id)
+                    view.isActivated = isSelected(conversation.id)
+                } else {
+                    selectOnly(conversation.id)
+                    rowLongClicks.onNext(conversation.id)
+                }
                 true
             }
         }
@@ -106,6 +127,7 @@ class ConversationsAdapter @Inject constructor(
         holder.containerView.isActivated = isSelected(conversation.id)
 
         holder.avatars.recipients = conversation.recipients
+        holder.avatars.isVisible = true
         holder.title.collapseEnabled = conversation.recipients.size > 1
         holder.title.text = buildSpannedString {
             append(conversation.getTitle())
@@ -120,7 +142,9 @@ class ConversationsAdapter @Inject constructor(
             else -> conversation.snippet
         }
         holder.pinned.isVisible = conversation.pinned
-        holder.unread.setTint(theme)
+        val muted = notificationManager.isConversationMuted(conversation.id)
+        holder.containerView.findViewById<android.view.View>(R.id.muted).isVisible = muted
+        holder.unread.imageTintList = ColorStateList.valueOf(theme)
     }
 
     override fun getItemId(position: Int): Long {
@@ -129,5 +153,12 @@ class ConversationsAdapter @Inject constructor(
 
     override fun getItemViewType(position: Int): Int {
         return if (getItem(position)?.unread == false) 0 else 1
+    }
+
+    fun findPositionById(id: Long): Int {
+        for (index in 0 until itemCount) {
+            if (getItem(index)?.id == id) return index
+        }
+        return -1
     }
 }

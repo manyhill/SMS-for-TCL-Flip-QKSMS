@@ -28,6 +28,8 @@ interface MessageRepository {
 
     fun getMessages(threadId: Long, query: String = ""): RealmResults<Message>
 
+    fun getRecentMessages(threadId: Long, limit: Long): RealmResults<Message>
+
     fun getMessage(id: Long): Message?
 
     fun getMessageForPart(id: Long): Message?
