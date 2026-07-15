@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   ~ Copyright (C) 2019 Moez Bhatti <moez.bhatti@gmail.com>
   ~
   ~ This file is part of QKSMS.
@@ -127,6 +127,12 @@
     <string name="compose_scheduled_future">Selected time must be in the future!</string>
     <string name="compose_scheduled_plus">You must unlock QKSMS+ to use scheduled messaging</string>
     <string name="compose_scheduled_toast">Added to scheduled messages</string>
+    <string name="compose_repeat_title">Repeat</string>
+    <string name="compose_repeat_none">Just once</string>
+    <string name="compose_repeat_daily">Daily</string>
+    <string name="compose_repeat_weekly">Weekly</string>
+    <string name="compose_repeat_monthly">Monthly</string>
+    <string name="compose_recurring_text_only">Recurring messages support text only</string>
     <string name="compose_hint">Write a message…</string>
     <string name="compose_menu_copy">Copy text</string>
     <string name="compose_menu_forward">Forward</string>
@@ -152,7 +158,10 @@
     <string name="compose_camera_cd">Take a photo</string>
     <string name="compose_schedule_cd">Schedule message</string>
     <string name="compose_contact_cd">Attach a contact</string>
+    <string name="compose_file_cd">Attach a file</string>
     <string name="compose_paste">Paste Text</string>
+    <string name="compose_speech_to_text">Speech to text</string>
+    <string name="compose_speech_to_text_unavailable">Speech recognition is not available</string>
     <string name="compose_contact_error">Error reading contact</string>
     <string name="compose_audio_cd">Attach audio</string>
     <string name="compose_audio_record_cd">Record audio</string>
@@ -188,7 +197,6 @@
     <string name="compose_sim_changed_toast">SIM %1$d (%2$s) selected</string>
     <string name="compose_sim_cd">%s selected, change SIM card</string>
     <string name="compose_send_cd">Send message</string>
-
     <string name="message_status_sending">Sending…</string>
     <string name="message_status_delivered">Delivered %s</string>
     <string name="message_status_failed">Failed to send. Tap to try again</string>
@@ -315,6 +323,9 @@
     <string name="settings_delivery_summary">Confirm that messages were sent successfully</string>
     <string name="settings_signature_title">Signature</string>
     <string name="settings_signature_summary">Add a signature to the end of your messages</string>
+
+    <string name="settings_contact_names_for_numbers_title">Show contact names for numbers</string>
+    <string name="settings_contact_names_for_numbers_summary">In message text, show a saved contact name next to matching phone numbers</string>
     <string name="settings_unicode_title">Strip accents</string>
     <string name="settings_unicode_summary">Remove accents from characters in outgoing SMS messages</string>
     <string name="settings_mobile_title">Mobile numbers only</string>

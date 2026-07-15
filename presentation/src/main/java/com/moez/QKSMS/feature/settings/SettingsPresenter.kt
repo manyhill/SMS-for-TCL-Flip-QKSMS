@@ -103,6 +103,9 @@ class SettingsPresenter @Inject constructor(
         disposables += prefs.signature.asObservable()
                 .subscribe { signature -> newState { copy(signature = signature) } }
 
+        disposables += prefs.showContactNamesForNumbers.asObservable()
+                .subscribe { enabled -> newState { copy(showContactNamesForNumbers = enabled) } }
+
         val textSizeLabels = context.resources.getStringArray(R.array.text_sizes)
         disposables += prefs.textSize.asObservable()
                 .subscribe { textSize ->
@@ -179,6 +182,8 @@ class SettingsPresenter @Inject constructor(
                         R.id.delivery -> prefs.delivery.set(!prefs.delivery.get())
 
                         R.id.signature -> view.showSignatureDialog(prefs.signature.get())
+
+                        R.id.showContactNamesForNumbers -> prefs.showContactNamesForNumbers.set(!prefs.showContactNamesForNumbers.get())
 
                         R.id.textSize -> view.showTextSizePicker()
 

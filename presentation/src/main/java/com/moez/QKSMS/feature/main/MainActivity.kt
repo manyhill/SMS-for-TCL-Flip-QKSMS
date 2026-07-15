@@ -26,7 +26,6 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.*
 import android.widget.Toast
 import androidx.appcompat.app.ActionBarDrawerToggle
@@ -545,10 +544,6 @@ class MainActivity : QkThemedActivity(), MainView {
 
     override fun onResume() {
         super.onResume()
-        Log.d(
-            "QK-COMPOSE",
-            "MainActivity onResume selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} focus=${currentFocus?.javaClass?.simpleName ?: "null"}"
-        )
         activityResumedIntent.onNext(true)
         refreshConversationListState()
         if (pendingRestoreConversationFocus) {
@@ -564,10 +559,6 @@ class MainActivity : QkThemedActivity(), MainView {
     }
 
     override fun onPause() {
-        Log.d(
-            "QK-COMPOSE",
-            "MainActivity onPause selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} focus=${currentFocus?.javaClass?.simpleName ?: "null"}"
-        )
         pendingRestoreConversationFocus = rememberFocusedConversationForRestore()
         recyclerView.removeCallbacks(delayedConversationRefresh)
         clearSelection()
@@ -673,11 +664,6 @@ class MainActivity : QkThemedActivity(), MainView {
     }
 
     override fun onBackPressed() {
-        Log.d(
-            "QK-LIFE",
-            "onBackPressed selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} drawerOpen=${drawerLayout.isDrawerOpen(GravityCompat.START)}"
-        )
-
         if (conversationMultipleSelectionMode || selectedConversationCount > 0) {
             clearSelection()
             ensureMainFocus()
@@ -715,10 +701,6 @@ class MainActivity : QkThemedActivity(), MainView {
         //Toast.makeText(this,"focus: "+ currentFocus.toString(), Toast.LENGTH_LONG).show()
         return when (event?.keyCode ?: keyCode) {
             KeyEvent.KEYCODE_SOFT_LEFT, 1 -> {
-                Log.d(
-                    "QK-COMPOSE",
-                    "softLeftCompose selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} focus=${currentFocus?.javaClass?.simpleName ?: "null"}"
-                )
                 compose.performClick()
                 true
             }
@@ -737,11 +719,6 @@ class MainActivity : QkThemedActivity(), MainView {
             val resolvedMutedState = resolveCurrentMutedState(currentOptionsMarkMuted)
             val resolvedPinnedState = resolveCurrentPinnedState(currentOptionsMarkPinned)
             val resolvedReadState = resolveCurrentReadState(currentOptionsMarkRead)
-
-            Log.d(
-                "QK-PIN",
-                "openOptions selection=${conversationsAdapter.getSelection()} markPinnedDefault=$currentOptionsMarkPinned resolvedMarkPinned=$resolvedPinnedState"
-            )
 
             showOptionsDialog(
                 currentOptionsIsArchive,
@@ -762,10 +739,6 @@ class MainActivity : QkThemedActivity(), MainView {
     }
     private fun initClicks() {
         compose.setOnClickListener {
-            Log.d(
-                "QK-COMPOSE",
-                "composeClick selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()} pageInbox=$isInboxPage pageArchived=$isArchivedPage pageSearching=$isSearchingPage"
-            )
             launchComposeDirect()
         }
         options.setOnClickListener {
@@ -775,34 +748,21 @@ class MainActivity : QkThemedActivity(), MainView {
 
     private fun launchComposeDirect() {
         val adapterSelection = conversationsAdapter.getSelection().toList()
-        Log.d(
-            "QK-COMPOSE",
-            "launchComposeDirect before selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=$adapterSelection pageInbox=$isInboxPage pageArchived=$isArchivedPage pageSearching=$isSearchingPage"
-        )
 
         if (selectedConversationCount > 0 || adapterSelection.isNotEmpty()) {
             resetConversationSelection()
         }
 
-        Log.d("QK-COMPOSE", "launchComposeDirect startActivity")
         navigator.showCompose()
     }
 
     private fun resetConversationSelection() {
-        Log.d(
-            "QK-COMPOSE",
-            "resetConversationSelection before selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()}"
-        )
         conversationMultipleSelectionMode = false
         pendingShowOptionsForSelection = false
         selectedConversationCount = 0
         lastSelectedConversationToastCount = 0
         conversationsAdapter.multipleSelectionEnabled = false
         conversationsAdapter.clearSelection()
-        Log.d(
-            "QK-COMPOSE",
-            "resetConversationSelection after selectedCount=$selectedConversationCount multi=$conversationMultipleSelectionMode adapterSelection=${conversationsAdapter.getSelection()}"
-        )
     }
 
     private fun showSelectedConversationToast(count: Int) {
@@ -851,7 +811,6 @@ class MainActivity : QkThemedActivity(), MainView {
 
     private fun toggleConversationPin(threadId: Long) {
         val pinnedBefore = mainConversationRepo.getConversation(threadId)?.pinned ?: false
-        Log.d("QK-PIN", "directActivity toggle threadId=$threadId pinnedBefore=$pinnedBefore")
 
         if (pinnedBefore) {
             markUnpinned.execute(listOf(threadId)) {
@@ -866,7 +825,6 @@ class MainActivity : QkThemedActivity(), MainView {
 
     private fun refreshPinnedConversationAfterToggle(threadId: Long, pinnedBefore: Boolean) {
         val pinnedAfter = mainConversationRepo.getConversation(threadId)?.pinned ?: pinnedBefore
-        Log.d("QK-PIN", "directActivity toggled threadId=$threadId pinnedAfter=$pinnedAfter")
 
         currentOptionsMarkPinned = !pinnedAfter
         conversationsAdapter.updateData(mainConversationRepo.getConversations(currentOptionsIsArchive))
@@ -951,10 +909,6 @@ class MainActivity : QkThemedActivity(), MainView {
             }
 
             override fun onPinToTopClicked() {
-                Log.d(
-                    "QK-PIN",
-                    "popupPinClick selection=${conversationsAdapter.getSelection()} markPinned=$markPinned"
-                )
                 val threadId = conversationsAdapter.getSelection().singleOrNull()
                 threadId?.let(::toggleConversationPin)
                 if (!conversationMultipleSelectionMode) {

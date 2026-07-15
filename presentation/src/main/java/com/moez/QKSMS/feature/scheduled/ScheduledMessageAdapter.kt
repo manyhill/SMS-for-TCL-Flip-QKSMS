@@ -76,7 +76,13 @@ class ScheduledMessageAdapter @Inject constructor(
             contactCache[address]?.name?.takeIf { it.isNotBlank() } ?: address
         }
 
-        holder.date.text = dateFormatter.getScheduledTimestamp(message.date)
+        val date = dateFormatter.getScheduledTimestamp(message.date)
+        holder.date.text = when (message.repeatInterval) {
+            ScheduledMessage.REPEAT_DAILY -> "$date - ${context.getString(R.string.compose_repeat_daily)}"
+            ScheduledMessage.REPEAT_WEEKLY -> "$date - ${context.getString(R.string.compose_repeat_weekly)}"
+            ScheduledMessage.REPEAT_MONTHLY -> "$date - ${context.getString(R.string.compose_repeat_monthly)}"
+            else -> date
+        }
         holder.body.text = message.body
 
         val adapter = holder.attachments.adapter as ScheduledMessageAttachmentAdapter

@@ -18,7 +18,6 @@
  */
 package com.moez.QKSMS.feature.main
 
-import android.util.Log
 import androidx.recyclerview.widget.ItemTouchHelper
 import com.moez.QKSMS.R
 import com.moez.QKSMS.common.Navigator
@@ -217,18 +216,14 @@ class MainViewModel @Inject constructor(
                     is Archived -> state.page.selected
                     else -> 0
                 }
-                Log.d("QK-COMPOSE", "composeIntent statePage=${state.page::class.java.simpleName} selected=$selected")
                 when {
                     state.page is Inbox && state.page.selected > 0 -> {
-                        Log.d("QK-COMPOSE", "composeIntent clearing inbox selection=${state.page.selected}")
                         view.clearSelection()
                     }
                     state.page is Archived && state.page.selected > 0 -> {
-                        Log.d("QK-COMPOSE", "composeIntent clearing archived selection=${state.page.selected}")
                         view.clearSelection()
                     }
                 }
-                Log.d("QK-COMPOSE", "composeIntent launching compose")
                 navigator.showCompose()
             }
 
@@ -317,18 +312,12 @@ class MainViewModel @Inject constructor(
             .subscribe { selection ->
                 val conversations = selection.mapNotNull(conversationRepo::getConversation)
                 val shouldPin = conversations.sumBy { if (it.pinned) -1 else 1 } >= 0
-                Log.d(
-                    "QK-PIN",
-                    "handler selection=$selection states=${conversations.map { "${it.id}:${it.pinned}" }} shouldPin=$shouldPin"
-                )
                 if (shouldPin) {
                     markPinned.execute(selection) {
-                        Log.d("QK-PIN", "markPinned complete selection=$selection")
                         view.clearSelection()
                     }
                 } else {
                     markUnpinned.execute(selection) {
-                        Log.d("QK-PIN", "markUnpinned complete selection=$selection")
                         view.clearSelection()
                     }
                 }
@@ -366,7 +355,6 @@ class MainViewModel @Inject constructor(
         view.conversationOptionActionIntent
             .autoDisposable(view.scope())
             .subscribe { (itemId, selection) ->
-                Log.d("QK-OPT", "direct action itemId=$itemId selection=$selection")
                 when (itemId) {
                     R.id.archive -> {
                         val currentState = state.blockingFirst()
@@ -436,15 +424,12 @@ class MainViewModel @Inject constructor(
             .autoDisposable(view.scope())
             .subscribe { threadId ->
                 val conversation = conversationRepo.getConversation(threadId)
-                Log.d("QK-PIN", "direct handler threadId=$threadId pinnedBefore=${conversation?.pinned}")
                 if (conversation?.pinned == true) {
                     markUnpinned.execute(listOf(threadId)) {
-                        Log.d("QK-PIN", "direct markUnpinned complete threadId=$threadId")
                         updateSelectionState(listOf(threadId))
                     }
                 } else {
                     markPinned.execute(listOf(threadId)) {
-                        Log.d("QK-PIN", "direct markPinned complete threadId=$threadId")
                         updateSelectionState(listOf(threadId))
                     }
                 }

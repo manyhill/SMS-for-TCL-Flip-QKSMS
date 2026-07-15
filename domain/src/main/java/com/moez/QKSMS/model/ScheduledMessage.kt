@@ -29,7 +29,8 @@ open class ScheduledMessage(
     var recipients: RealmList<String> = RealmList(),
     var sendAsGroup: Boolean = true,
     var body: String = "",
-    var attachments: RealmList<String> = RealmList()
+    var attachments: RealmList<String> = RealmList(),
+    var repeatInterval: Int = REPEAT_NONE
 ) : RealmObject() {
 
     fun copy(
@@ -39,10 +40,18 @@ open class ScheduledMessage(
         recipients: RealmList<String> = this.recipients,
         sendAsGroup: Boolean = this.sendAsGroup,
         body: String = this.body,
-        attachments: RealmList<String> = this.attachments
+        attachments: RealmList<String> = this.attachments,
+        repeatInterval: Int = this.repeatInterval
     ): ScheduledMessage {
 
-        return ScheduledMessage(id, date, subId, recipients, sendAsGroup, body, attachments)
+        return ScheduledMessage(id, date, subId, recipients, sendAsGroup, body, attachments, repeatInterval)
+    }
+
+    companion object {
+        const val REPEAT_NONE = 0
+        const val REPEAT_DAILY = 1
+        const val REPEAT_WEEKLY = 2
+        const val REPEAT_MONTHLY = 3
     }
 
 }

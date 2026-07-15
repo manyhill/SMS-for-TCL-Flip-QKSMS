@@ -308,8 +308,11 @@ class ConversationRepositoryImpl @Inject constructor(
                     .sort("date", Sort.DESCENDING)
                     .findFirst()
 
+                val unreadCount = getUnreadMessageCount(realm, threadId)
+
                 realm.executeTransaction {
                     conversation.lastMessage = message
+                    conversation.unreadCount = unreadCount
                 }
             }
         }
@@ -425,6 +428,7 @@ class ConversationRepositoryImpl @Inject constructor(
                     .sort("date", Sort.DESCENDING)
                     .findFirst()
                     ?.let(realm::copyFromRealm)
+                val unreadCount = getUnreadMessageCount(realm, threadId)
 
                 val recipients = conversation.recipients
                     .map { recipient -> recipient.id }
@@ -444,10 +448,20 @@ class ConversationRepositoryImpl @Inject constructor(
                 conversation.recipients.clear()
                 conversation.recipients.addAll(recipients)
                 conversation.lastMessage = lastMessage
+                conversation.unreadCount = unreadCount
                 realm.executeTransaction { it.insertOrUpdate(conversation) }
                 realm.close()
 
                 conversation
             }
+    }
+
+    private fun getUnreadMessageCount(realm: Realm, threadId: Long): Int {
+        return realm.where(Message::class.java)
+            .equalTo("threadId", threadId)
+            .equalTo("read", false)
+            .count()
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
     }
 }

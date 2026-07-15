@@ -178,6 +178,12 @@ class SyncRepositoryImpl @Inject constructor(
                                 .sort("date", Sort.DESCENDING)
                                 .equalTo("threadId", id)
                                 .findFirst()
+                        unreadCount = realm.where(Message::class.java)
+                                .equalTo("threadId", id)
+                                .equalTo("read", false)
+                                .count()
+                                .coerceAtMost(Int.MAX_VALUE.toLong())
+                                .toInt()
                     }
                     realm.insertOrUpdate(conversation)
                 }

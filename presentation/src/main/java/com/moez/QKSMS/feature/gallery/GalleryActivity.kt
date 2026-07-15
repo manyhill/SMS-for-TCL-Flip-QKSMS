@@ -370,6 +370,17 @@ zoomIn = findViewById(R.id.zoomin)
         }
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP && event.repeatCount == 0) {
+                onBackPressed()
+            }
+            return true
+        }
+
+        return super.dispatchKeyEvent(event)
+    }
+
 
     override fun render(state: GalleryState) {
         toolbar.setVisible(state.navigationVisible)

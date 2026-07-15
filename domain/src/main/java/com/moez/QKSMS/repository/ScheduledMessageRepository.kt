@@ -32,7 +32,8 @@ interface ScheduledMessageRepository {
         recipients: List<String>,
         sendAsGroup: Boolean,
         body: String,
-        attachments: List<String>
+        attachments: List<String>,
+        repeatInterval: Int = ScheduledMessage.REPEAT_NONE
     )
 
     /**
@@ -49,5 +50,11 @@ interface ScheduledMessageRepository {
      * Deletes the scheduled message with the given [id]
      */
     fun deleteScheduledMessage(id: Long)
+
+    /**
+     * Deletes one-time scheduled messages after sending, or moves recurring messages to their next date.
+     * Returns the next date when the message should be alarmed again.
+     */
+    fun markScheduledMessageSent(id: Long): Long?
 
 }

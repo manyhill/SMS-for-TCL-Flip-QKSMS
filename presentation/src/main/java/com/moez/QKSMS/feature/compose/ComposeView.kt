@@ -34,6 +34,11 @@ interface ComposeView : QkView<ComposeState> {
         val messageIds: List<Long>
     )
 
+    data class ScheduledOptions(
+        val date: Long,
+        val repeatInterval: Int
+    )
+
     val activityVisibleIntent: Observable<Boolean>
     val chipsSelectedIntent: Subject<HashMap<String, String?>>
     val chipDeletedIntent: Subject<Recipient>
@@ -58,8 +63,9 @@ interface ComposeView : QkView<ComposeState> {
     val contactSelectedIntent: Observable<Uri>
     val audioSelectedIntent: Observable<Uri>
     val videoSelectedIntent: Observable<Uri>
+    val fileSelectedIntent: Observable<Uri>
     val inputContentIntent: Observable<InputContentInfoCompat>
-    val scheduleSelectedIntent: Observable<Long>
+    val scheduleSelectedIntent: Observable<ScheduledOptions>
     val scheduleCancelIntent: Observable<*>
     val changeSimIntent: Observable<*>
     val sendIntent: Observable<Unit>
@@ -80,8 +86,10 @@ interface ComposeView : QkView<ComposeState> {
     fun recordAudio()
     fun requestAudio()
     fun requestVideo()
+    fun requestFile()
     fun recordVideo()
     fun requestVoice()
+    fun startSpeechRecognition()
     fun requestDatePicker()
     fun requestContact()
     fun initPhotoMenu()

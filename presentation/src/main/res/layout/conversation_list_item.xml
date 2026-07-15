@@ -106,14 +106,22 @@
             tools:visibility="visible" />
 
 
-        <ImageView
+        <com.moez.QKSMS.common.widget.QkTextView
             android:id="@+id/unread"
-            android:layout_width="16dp"
-            android:layout_height="16dp"
+            android:layout_width="wrap_content"
+            android:layout_height="18dp"
             android:layout_marginStart="6dp"
-            android:src="@drawable/circle"
+            android:background="@drawable/circle"
+            android:gravity="center"
+            android:minWidth="18dp"
+            android:paddingStart="5dp"
+            android:paddingEnd="5dp"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:textStyle="bold"
             android:visibility="gone"
-            tools:tint="@color/tools_theme"
+            tools:backgroundTint="@color/tools_theme"
+            tools:text="3"
             tools:visibility="visible" />
     </LinearLayout>
 

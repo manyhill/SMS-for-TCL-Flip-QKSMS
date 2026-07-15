@@ -21,10 +21,11 @@ package com.moez.QKSMS.repository
 import com.moez.QKSMS.extensions.anyOf
 import com.moez.QKSMS.model.BlockedNumber
 import com.moez.QKSMS.util.PhoneNumberUtils
+import com.moez.QKSMS.util.RealmProvider
 import io.realm.Realm
 import io.realm.RealmResults
 import javax.inject.Inject
-import com.moez.QKSMS.util.RealmProvider
+
 class BlockingRepositoryImpl @Inject constructor(
     private val phoneNumberUtils: PhoneNumberUtils
 ) : BlockingRepository {

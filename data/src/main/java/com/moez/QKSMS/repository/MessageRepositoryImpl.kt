@@ -170,7 +170,7 @@ class MessageRepositoryImpl @Inject constructor(
             realm.where(Conversation::class.java)
                 .equalTo("archived", false)
                 .equalTo("blocked", false)
-                .equalTo("lastMessage.read", false)
+                .greaterThan("unreadCount", 0)
                 .count()
         }
     }
@@ -298,6 +298,11 @@ class MessageRepositoryImpl @Inject constructor(
                     message.seen = true
                     message.read = true
                 }
+
+                realm.where(Conversation::class.java)
+                    .anyOf("id", threadIds)
+                    .findAll()
+                    .forEach { conversation -> conversation.unreadCount = 0 }
             }
         }
 
@@ -326,6 +331,7 @@ class MessageRepositoryImpl @Inject constructor(
             realm.executeTransaction {
                 conversations.forEach { conversation ->
                     conversation.lastMessage?.read = false
+                    conversation.unreadCount = maxOf(conversation.unreadCount, 1)
                 }
             }
         }

@@ -30,6 +30,7 @@ import dagger.Provides
 import dagger.multibindings.IntoMap
 import java.net.URLDecoder
 import java.nio.charset.Charset
+import java.util.Locale
 import javax.inject.Named
 
 @Module
@@ -59,6 +60,22 @@ class ComposeActivityModule {
     @Named("forwardMode")
     fun provideForwardMode(activity: ComposeActivity): Boolean {
         return activity.intent.extras?.getBoolean("forward_mode", false) ?: false
+    }
+
+    @Provides
+    @Named("directThreadMode")
+    fun provideDirectThreadMode(activity: ComposeActivity): Boolean {
+        val intent = activity.intent
+        val scheme = intent.data?.scheme?.toLowerCase(Locale.US)
+        val isMessageUri = scheme == "sms" || scheme == "smsto" || scheme == "mms" || scheme == "mmsto"
+        val hasAddress = intent
+                ?.decodedDataString()
+                ?.substringAfter(':')
+                ?.substringBefore("?")
+                ?.isNotEmpty() == true
+        val isForward = intent.extras?.getBoolean("forward_mode", false) ?: false
+
+        return isMessageUri && hasAddress && !isForward
     }
 
     @Provides

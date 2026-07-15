@@ -112,6 +112,7 @@ class Preferences @Inject constructor(
     val autoEmoji = rxPrefs.getBoolean("autoEmoji", true)
     val delivery = rxPrefs.getBoolean("delivery", false)
     val signature = rxPrefs.getString("signature", "")
+    val showContactNamesForNumbers = rxPrefs.getBoolean("showContactNamesForNumbers", false)
     val unicode = rxPrefs.getBoolean("unicode", false)
     val mobileOnly = rxPrefs.getBoolean("mobileOnly", false)
     val autoDelete = rxPrefs.getInteger("autoDelete", 0)

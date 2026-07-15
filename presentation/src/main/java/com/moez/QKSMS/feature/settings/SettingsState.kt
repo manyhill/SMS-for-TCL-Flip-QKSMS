@@ -35,6 +35,7 @@ data class SettingsState(
     val sendDelayId: Int = 0,
     val deliveryEnabled: Boolean = false,
     val signature: String = "",
+    val showContactNamesForNumbers: Boolean = false,
     val textSizeSummary: String = "",
     val textSizeId: Int = Preferences.TEXT_SIZE_NORMAL,
     val systemFontEnabled: Boolean = false,

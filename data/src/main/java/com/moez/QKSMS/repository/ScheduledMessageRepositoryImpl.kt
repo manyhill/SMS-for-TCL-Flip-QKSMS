@@ -22,6 +22,7 @@ import com.moez.QKSMS.model.ScheduledMessage
 import io.realm.Realm
 import io.realm.RealmList
 import io.realm.RealmResults
+import java.util.Calendar
 import javax.inject.Inject
 import com.moez.QKSMS.util.RealmProvider
 
@@ -34,7 +35,8 @@ class ScheduledMessageRepositoryImpl @Inject constructor() : ScheduledMessageRep
         recipients: List<String>,
         sendAsGroup: Boolean,
         body: String,
-        attachments: List<String>
+        attachments: List<String>,
+        repeatInterval: Int
     ) {
         Realm.getDefaultInstance().use { realm ->
             val id = (realm.where(ScheduledMessage::class.java).max("id")?.toLong() ?: -1) + 1
@@ -42,7 +44,7 @@ class ScheduledMessageRepositoryImpl @Inject constructor() : ScheduledMessageRep
             val attachmentsRealmList = RealmList(*attachments.toTypedArray())
 
             val message = ScheduledMessage(id, date, subId, recipientsRealmList, sendAsGroup, body,
-                    attachmentsRealmList)
+                    attachmentsRealmList, repeatInterval)
 
             realm.executeTransaction { realm.insertOrUpdate(message) }
         }
@@ -73,6 +75,45 @@ class ScheduledMessageRepositoryImpl @Inject constructor() : ScheduledMessageRep
 
                     realm.executeTransaction { message?.deleteFromRealm() }
                 }
+    }
+
+    override fun markScheduledMessageSent(id: Long): Long? {
+        return RealmProvider.get()
+                .apply { refresh() }
+                .use { realm ->
+                    val message = realm.where(ScheduledMessage::class.java)
+                            .equalTo("id", id)
+                            .findFirst()
+                            ?: return null
+
+                    val nextDate = getNextDate(message.date, message.repeatInterval)
+
+                    realm.executeTransaction {
+                        if (nextDate == null) {
+                            message.deleteFromRealm()
+                        } else {
+                            message.date = nextDate
+                        }
+                    }
+
+                    nextDate
+                }
+    }
+
+    private fun getNextDate(date: Long, repeatInterval: Int): Long? {
+        val field = when (repeatInterval) {
+            ScheduledMessage.REPEAT_DAILY -> Calendar.DAY_OF_YEAR
+            ScheduledMessage.REPEAT_WEEKLY -> Calendar.WEEK_OF_YEAR
+            ScheduledMessage.REPEAT_MONTHLY -> Calendar.MONTH
+            else -> return null
+        }
+
+        return Calendar.getInstance().apply {
+            timeInMillis = date
+            do {
+                add(field, 1)
+            } while (timeInMillis <= System.currentTimeMillis())
+        }.timeInMillis
     }
 
 }

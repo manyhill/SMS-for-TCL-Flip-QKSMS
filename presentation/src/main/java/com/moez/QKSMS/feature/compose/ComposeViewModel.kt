@@ -26,7 +26,6 @@ import android.provider.ContactsContract
 import android.provider.OpenableColumns
 import android.telephony.SmsMessage
 import android.text.util.Linkify
-import android.util.Log
 import androidx.core.content.getSystemService
 import com.android.i18n.phonenumbers.PhoneNumberUtil
 import com.moez.QKSMS.R
@@ -82,6 +81,7 @@ class ComposeViewModel @Inject constructor(
     @Named("threadId") private val threadId: Long,
     @Named("addresses") private val addresses: List<String>,
     @Named("forwardMode") private val forwardMode: Boolean,
+    @Named("directThreadMode") private val directThreadMode: Boolean,
     @Named("text") private val sharedText: String,
     @Named("attachments") private val sharedAttachments: Attachments,
     private val contactRepo: ContactRepository,
@@ -105,7 +105,7 @@ class ComposeViewModel @Inject constructor(
     private val subscriptionManager: SubscriptionManagerCompat
 ) : QkViewModel<ComposeView, ComposeState>(
     ComposeState(
-        editingMode = threadId == 0L, threadId = threadId, query = query
+        editingMode = threadId == 0L && !directThreadMode, threadId = threadId, query = query
     )
 ) {
     private fun dedupeRecipientsByAddress(recipients: List<Recipient>): List<Recipient> {
@@ -248,13 +248,26 @@ class ComposeViewModel @Inject constructor(
         }
     }
 
+    private fun openDirectAddressesThroughSelection(addresses: List<String>) {
+        val recipients = addresses.map { address -> Recipient(address = address) }
+        currentSelectedRecipients = listOf()
+        selectedChips.onNext(recipients)
+        newState {
+            copy(
+                editingMode = false,
+                selectedChips = listOf(),
+                loading = true
+            )
+        }
+    }
+
     init {
         val initialConversation =
             threadId.takeIf { it != 0L }?.let(conversationRepo::getConversationAsync)
                 ?.asObservable() ?: Observable.empty()
 
         val selectedConversation = when {
-            threadId == 0L -> Observable.empty<Conversation>()
+            threadId == 0L && !directThreadMode -> Observable.empty<Conversation>()
             else -> selectedChips.skipWhile { it.isEmpty() }.map { chips -> chips.map { it.address } }
                 .distinctUntilChanged().doOnNext { newState { copy(loading = true) } }
                 .observeOn(Schedulers.io()).map { addresses ->
@@ -292,9 +305,24 @@ class ComposeViewModel @Inject constructor(
                 if (!conversation.isValid) {
                     newState { copy(hasError = true) }
                 }
-            }.filter { conversation -> conversation.isValid }.subscribe(conversation::onNext)
+            }.filter { conversation -> conversation.isValid }.subscribe { resolvedConversation ->
+                conversation.onNext(resolvedConversation)
+                if (directThreadMode) {
+                    currentSelectedRecipients = listOf()
+                    newState {
+                        copy(
+                            editingMode = false,
+                            threadId = resolvedConversation.id,
+                            selectedChips = listOf(),
+                            loading = false
+                        )
+                    }
+                }
+            }
 
-        if (addresses.isNotEmpty()) {
+        if (addresses.isNotEmpty() && directThreadMode) {
+            openDirectAddressesThroughSelection(addresses)
+        } else if (addresses.isNotEmpty()) {
             applySelectedChips(addresses.map { address -> Recipient(address = address) })
         }
 
@@ -393,7 +421,6 @@ class ComposeViewModel @Inject constructor(
         }
 
         view.chipsSelectedIntent.withLatestFrom(selectedChips) { hashmap, chips ->
-            Log.d("QK-COMPOSE", "chipsSelected result=${hashmap.keys} existing=${chips.map { it.address }} forwardMode=$forwardMode")
             if (hashmap.isEmpty() && chips.isEmpty()) {
                 newState { copy(hasError = true) }
             }
@@ -411,7 +438,6 @@ class ComposeViewModel @Inject constructor(
                 )
             }.let { recipients -> if (forwardMode) recipients.take(1) else recipients }
         }.autoDisposable(view.scope()).subscribe { chips ->
-            Log.d("QK-COMPOSE", "chipsSelected add chips=${chips.map { it.address }}")
             applySelectedChips(selectedChips.blockingFirst() + chips)
             view.showKeyboard()
         }
@@ -482,7 +508,6 @@ class ComposeViewModel @Inject constructor(
         view.messageOptionActionIntent
             .filter { action -> action.itemId == R.id.copy }
             .map { action ->
-                Log.d("QK-MSGOPT", "handler=copy selection=${action.messageIds}")
                 val messages = action.messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
                 val text = when (messages.size) {
                     1 -> messages.first().getText()
@@ -498,12 +523,10 @@ class ComposeViewModel @Inject constructor(
                 ClipboardUtils.copy(context, text)
             }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
 
-
         // Save attachments to the appropriate device folder
         view.messageOptionActionIntent
             .filter { action -> action.itemId == R.id.save }
             .map { action ->
-                Log.d("QK-MSGOPT", "handler=save selection=${action.messageIds}")
                 val messages = action.messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
                 val clickedMessage: Message = messages.first()
                 var savedAny = false
@@ -566,7 +589,6 @@ class ComposeViewModel @Inject constructor(
         view.messageOptionActionIntent
             .filter { action -> action.itemId == R.id.details }
             .map { action ->
-                Log.d("QK-MSGOPT", "handler=details selection=${action.messageIds}")
                 action.messageIds
             }
             .mapNotNull { messages -> messages.firstOrNull().also { view.clearSelection() } }
@@ -580,7 +602,6 @@ class ComposeViewModel @Inject constructor(
             .withLatestFrom(
                 conversation
             ) { action, conversation ->
-                Log.d("QK-MSGOPT", "handler=delete selection=${action.messageIds} conversationId=${conversation.id}")
                 deleteMessages.execute(DeleteMessages.Params(action.messageIds, conversation.id))
             }.autoDisposable(view.scope()).subscribe { view.clearSelection() }
 
@@ -588,7 +609,6 @@ class ComposeViewModel @Inject constructor(
         view.messageOptionActionIntent
             .filter { action -> action.itemId == R.id.forward }
             .map { action ->
-                Log.d("QK-MSGOPT", "handler=forward selection=${action.messageIds}")
                 action.messageIds.firstOrNull()?.let { messageRepo.getMessage(it) }?.let { message ->
                     navigator.showForward(message.getText(), message.toDraftAttachments())
                 }
@@ -692,7 +712,6 @@ class ComposeViewModel @Inject constructor(
         view.messageOptionActionIntent
             .filter { action -> action.itemId == R.id.play }
             .map { action ->
-                Log.d("QK-MSGOPT", "handler=play selection=${action.messageIds}")
                 val messages = action.messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
                 val clickedMessage: Message = messages.first()
 
@@ -876,11 +895,18 @@ class ComposeViewModel @Inject constructor(
 
         // Set the scheduled time
         view.scheduleSelectedIntent.filter { scheduled ->
-            (scheduled > System.currentTimeMillis()).also { future ->
+            (scheduled.date > System.currentTimeMillis()).also { future ->
                 if (!future) context.makeToast(R.string.compose_scheduled_future)
             }
         }.autoDisposable(view.scope())
-            .subscribe { scheduled -> newState { copy(scheduled = scheduled) } }
+            .subscribe { scheduled ->
+                newState {
+                    copy(
+                        scheduled = scheduled.date,
+                        scheduledRepeatInterval = scheduled.repeatInterval
+                    )
+                }
+            }
 
         // Attach an audio file
 //        view.attachAudioIntent
@@ -911,6 +937,14 @@ class ComposeViewModel @Inject constructor(
             .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
             .subscribe { view.recordVideo() }
 
+        view.optionsItemIntent.filter { it == R.id.attach_file }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.requestFile() }
+
+        view.optionsItemIntent.filter { it == R.id.speech_to_text }
+            .doOnNext { newState { copy(attaching = false) } }.autoDisposable(view.scope())
+            .subscribe { view.startSpeechRecognition() }
+
         // Attach a contact
         view.attachContactIntent.doOnNext { newState { copy(attaching = false) } }
             .autoDisposable(view.scope()).subscribe { view.requestContact() }
@@ -930,6 +964,9 @@ class ComposeViewModel @Inject constructor(
 
         Observable.merge(
             view.audioSelectedIntent.map { uri ->
+                Attachment.File(uri)
+            },
+            view.fileSelectedIntent.map { uri ->
                 Attachment.File(uri)
             },
             view.inputContentIntent.map { inputContent ->
@@ -997,7 +1034,7 @@ class ComposeViewModel @Inject constructor(
 
         // Cancel the scheduled time
         view.scheduleCancelIntent.autoDisposable(view.scope())
-            .subscribe { newState { copy(scheduled = 0) } }
+            .subscribe { newState { copy(scheduled = 0, scheduledRepeatInterval = ScheduledMessage.REPEAT_NONE) } }
 
         // Toggle to the next sim slot
         view.changeSimIntent.withLatestFrom(state) { _, state ->
@@ -1026,20 +1063,12 @@ class ComposeViewModel @Inject constructor(
 
         // Send a message when the send button is clicked, and disable editing mode if it's enabled
         view.sendIntent
-            .doOnNext {
-                Log.d(
-                    "QK-COMPOSE",
-                    "sendIntent received draftBlank=${view.getDraft().isBlank()}"
-                )
-            }
             .filter {
                 val isDefaultSms = permissionManager.isDefaultSms()
-                Log.d("QK-COMPOSE", "sendGate defaultSms=$isDefaultSms")
                 if (!isDefaultSms) view.requestDefaultSms()
                 isDefaultSms
             }.filter {
                 val hasSendSms = permissionManager.hasSendSms()
-                Log.d("QK-COMPOSE", "sendGate hasSendSms=$hasSendSms")
                 if (!hasSendSms) view.requestSmsPermission()
                 hasSendSms
             }
@@ -1054,16 +1083,10 @@ class ComposeViewModel @Inject constructor(
                     !state.editingMode && conversation.recipients.isNotEmpty() -> conversation.recipients.map { it.address }
                     else -> chips.map { chip -> chip.address }
                 })
-                Log.d(
-                    "QK-COMPOSE",
-                    "send addresses=$addresses stateEditing=${state.editingMode} stateChips=${state.selectedChips.map { it.address }} subjectChips=${chips.map { it.address }} currentRecipients=$currentRecipientAddresses conversationId=${conversation.id}"
-                )
                 if (body.isBlank() && attachments.isEmpty()) {
-                    Log.d("QK-COMPOSE", "send ignored emptyBodyAndAttachments addresses=$addresses")
                     return@withLatestFrom
                 }
                 if (addresses.isEmpty()) {
-                    Log.d("QK-COMPOSE", "send ignored emptyAddresses bodyBlank=${body.isBlank()}")
                     return@withLatestFrom
                 }
                 if (hasOversizedNonImageAttachments(body, attachments)) {
@@ -1088,7 +1111,11 @@ class ComposeViewModel @Inject constructor(
                 when {
                     // Scheduling a message
                     state.scheduled != 0L -> {
-                        newState { copy(scheduled = 0) }
+                        if (state.scheduledRepeatInterval != ScheduledMessage.REPEAT_NONE && attachments.isNotEmpty()) {
+                            context.makeToast(R.string.compose_recurring_text_only)
+                            return@withLatestFrom
+                        }
+                        newState { copy(scheduled = 0, scheduledRepeatInterval = ScheduledMessage.REPEAT_NONE) }
                         val uris =
                             attachments.mapNotNull { attachment ->
                                     when(attachment) {
@@ -1099,7 +1126,7 @@ class ComposeViewModel @Inject constructor(
                                     }
                                 }.mapNotNull { it.toString() }
                         val params = AddScheduledMessage.Params(
-                            state.scheduled, subId, addresses, sendAsGroup, body, uris
+                            state.scheduled, subId, addresses, sendAsGroup, body, uris, state.scheduledRepeatInterval
                         )
                         addScheduledMessage.execute(params)
                         context.makeToast(R.string.compose_scheduled_toast)
@@ -1163,6 +1190,7 @@ class ComposeViewModel @Inject constructor(
                 }
             }.autoDisposable(view.scope()).subscribe()
 
+
         // View QKSMS+
         view.viewQksmsPlusIntent.autoDisposable(view.scope())
             .subscribe { navigator.showQksmsPlusActivity("compose_schedule") }
@@ -1177,12 +1205,10 @@ class ComposeViewModel @Inject constructor(
                 }
             }.autoDisposable(view.scope()).subscribe()
 
-
     }
 
     fun onContactSelectionResult(hashmap: HashMap<String, String?>, view: ComposeView) {
         val chips = selectedChips.blockingFirst()
-        Log.d("QK-COMPOSE", "chipsSelected result=${hashmap.keys} existing=${chips.map { it.address }} forwardMode=$forwardMode")
 
         if (hashmap.isEmpty() && chips.isEmpty()) {
             newState { copy(hasError = true) }
@@ -1205,20 +1231,13 @@ class ComposeViewModel @Inject constructor(
     }
 
     fun onSendClicked(view: ComposeView) {
-        Log.d(
-            "QK-COMPOSE",
-            "sendIntent received direct=true draftBlank=${view.getDraft().isBlank()} currentRecipients=${currentSelectedRecipients.map { it.address }}"
-        )
-
         val isDefaultSms = permissionManager.isDefaultSms()
-        Log.d("QK-COMPOSE", "sendGate defaultSms=$isDefaultSms")
         if (!isDefaultSms) {
             view.requestDefaultSms()
             return
         }
 
         val hasSendSms = permissionManager.hasSendSms()
-        Log.d("QK-COMPOSE", "sendGate hasSendSms=$hasSendSms")
         if (!hasSendSms) {
             view.requestSmsPermission()
             return
@@ -1237,16 +1256,10 @@ class ComposeViewModel @Inject constructor(
             conversation.recipients.isNotEmpty() -> conversation.recipients.map { it.address }
             else -> chips.map { chip -> chip.address }
         })
-        Log.d(
-            "QK-COMPOSE",
-            "send addresses=$addresses stateEditing=${state.editingMode} stateChips=${state.selectedChips.map { it.address }} subjectChips=${chips.map { it.address }} currentRecipients=$currentRecipientAddresses conversationId=${conversation.id}"
-        )
         if (body.isBlank() && attachments.isEmpty()) {
-            Log.d("QK-COMPOSE", "send ignored emptyBodyAndAttachments addresses=$addresses")
             return
         }
         if (addresses.isEmpty()) {
-            Log.d("QK-COMPOSE", "send ignored emptyAddresses bodyBlank=${body.isBlank()}")
             return
         }
         if (hasOversizedNonImageAttachments(body, attachments)) {
@@ -1271,7 +1284,11 @@ class ComposeViewModel @Inject constructor(
 
         when {
             state.scheduled != 0L -> {
-                newState { copy(scheduled = 0) }
+                if (state.scheduledRepeatInterval != ScheduledMessage.REPEAT_NONE && attachments.isNotEmpty()) {
+                    context.makeToast(R.string.compose_recurring_text_only)
+                    return
+                }
+                newState { copy(scheduled = 0, scheduledRepeatInterval = ScheduledMessage.REPEAT_NONE) }
                 val uris = attachments.mapNotNull { attachment ->
                     when (attachment) {
                         is Attachment.Image -> attachment.getUri()
@@ -1281,7 +1298,7 @@ class ComposeViewModel @Inject constructor(
                     }
                 }.mapNotNull { it.toString() }
                 val params = AddScheduledMessage.Params(
-                    state.scheduled, subId, addresses, sendAsGroup, body, uris
+                    state.scheduled, subId, addresses, sendAsGroup, body, uris, state.scheduledRepeatInterval
                 )
                 addScheduledMessage.execute(params)
                 context.makeToast(R.string.compose_scheduled_toast)
@@ -1396,7 +1413,6 @@ class ComposeViewModel @Inject constructor(
     fun onMessageOptionAction(action: ComposeView.MessageOptionAction, view: ComposeView) {
         when (action.itemId) {
             R.id.copy -> {
-                Log.d("QK-MSGOPT", "handler=copy selection=${action.messageIds}")
                 val messages = action.messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
                 val text = when (messages.size) {
                     1 -> messages.first().getText()
@@ -1412,7 +1428,6 @@ class ComposeViewModel @Inject constructor(
                 view.clearSelection()
             }
             R.id.save -> {
-                Log.d("QK-MSGOPT", "handler=save selection=${action.messageIds}")
                 val messages = action.messageIds.mapNotNull(messageRepo::getMessage).sortedBy { it.date }
                 val clickedMessage = messages.firstOrNull()
                 var savedAny = false
@@ -1453,7 +1468,6 @@ class ComposeViewModel @Inject constructor(
                 view.clearSelection()
             }
             R.id.details -> {
-                Log.d("QK-MSGOPT", "handler=details selection=${action.messageIds}")
                 action.messageIds.firstOrNull()
                     ?.let(messageRepo::getMessage)
                     ?.let(messageDetailsFormatter::format)
@@ -1461,7 +1475,6 @@ class ComposeViewModel @Inject constructor(
                 view.clearSelection()
             }
             R.id.delete -> {
-                Log.d("QK-MSGOPT", "handler=delete selection=${action.messageIds}")
                 if (!permissionManager.isDefaultSms()) {
                     view.requestDefaultSms()
                     return
@@ -1471,7 +1484,6 @@ class ComposeViewModel @Inject constructor(
                 view.clearSelection()
             }
             R.id.forward -> {
-                Log.d("QK-MSGOPT", "handler=forward selection=${action.messageIds}")
                 action.messageIds.firstOrNull()
                     ?.let(messageRepo::getMessage)
                     ?.let { message ->
@@ -1480,7 +1492,6 @@ class ComposeViewModel @Inject constructor(
                 view.clearSelection()
             }
             R.id.play -> {
-                Log.d("QK-MSGOPT", "handler=play selection=${action.messageIds}")
                 val clickedMessage = action.messageIds.firstOrNull()?.let(messageRepo::getMessage)
                 if (clickedMessage?.isMms() == true) {
                     val targetMediaPart = clickedMessage.firstMediaPart()

@@ -36,7 +36,7 @@ class QkRealmMigration @Inject constructor(
 ) : RealmMigration {
 
     companion object {
-        const val SchemaVersion: Long = 11
+        const val SchemaVersion: Long = 13
     }
 
     @SuppressLint("ApplySharedPref")
@@ -230,6 +230,28 @@ class QkRealmMigration @Inject constructor(
                         val messageId = part.linkingObjects("Message", "parts").firstOrNull()?.getLong("contentId") ?: 0
                         part.setLong("messageId", messageId)
                     }
+
+            version++
+        }
+
+        if (version == 11L) {
+            realm.schema.get("Conversation")
+                    ?.addField("unreadCount", Int::class.java, FieldAttribute.REQUIRED)
+                    ?.transform { conversation ->
+                        val threadId = conversation.getLong("id")
+                        val count = realm.where("Message")
+                                .equalTo("threadId", threadId)
+                                .equalTo("read", false)
+                                .count()
+                        conversation.setInt("unreadCount", count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                    }
+
+            version++
+        }
+
+        if (version == 12L) {
+            realm.schema.get("ScheduledMessage")
+                    ?.addField("repeatInterval", Int::class.java, FieldAttribute.REQUIRED)
 
             version++
         }

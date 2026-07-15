@@ -34,10 +34,11 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.provider.MediaStore
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.text.SpannableString
 import android.text.style.URLSpan
 import android.text.util.Linkify
-import android.util.Log
 import android.view.*
 import android.widget.ArrayAdapter
 import android.widget.ListView
@@ -70,6 +71,7 @@ import com.moez.QKSMS.feature.compose.editing.ChipsAdapter
 import com.moez.QKSMS.feature.contacts.ContactsActivity
 import com.moez.QKSMS.extensions.*
 import com.moez.QKSMS.model.Attachment
+import com.moez.QKSMS.model.ScheduledMessage
 import com.moez.QKSMS.model.Message
 import com.moez.QKSMS.model.Recipient
 import com.uber.autodispose.android.lifecycle.scope
@@ -86,6 +88,7 @@ import javax.inject.Inject
 import timber.log.Timber
 
 private const val MAX_SMOOTH_SCROLL_MESSAGES = 20
+private val HEIMISH_DIRECTORY_CONTACTS_URI = Uri.parse("content://com.belz.flipcallerid.contacts/contacts")
 
 class ComposeActivity : QkThemedActivity(), ComposeView {
 
@@ -106,8 +109,11 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         private const val RecordVideoRequestCode = 7
         private const val DateTimePickerRequestCode = 8
         private const val RecordAudioPermissionRequestCode = 9
+        private const val AttachFileRequestCode = 10
+        private const val SpeechRecognitionRequestCode = 11
 
         private const val CameraDestinationKey = "camera_destination"
+        private val pendingMediaRestoreMessages = mutableMapOf<Long, Long>()
     }
 
     @Inject
@@ -166,15 +172,15 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     override val attachmentSelectedIntent: Subject<Uri> = PublishSubject.create()
     override val contactSelectedIntent: Subject<Uri> = PublishSubject.create()
     override val inputContentIntent by lazy { message.inputContentSelected }
-    override val scheduleSelectedIntent: Subject<Long> = PublishSubject.create()
+    override val scheduleSelectedIntent: Subject<ComposeView.ScheduledOptions> = PublishSubject.create()
     override val changeSimIntent by lazy { sim.clicks() }
     override val scheduleCancelIntent by lazy { scheduledCancel.clicks() }
     override val audioSelectedIntent: Subject<Uri> = PublishSubject.create()
     override val videoSelectedIntent: Subject<Uri> = PublishSubject.create()
+    override val fileSelectedIntent: Subject<Uri> = PublishSubject.create()
 
     override val sendIntent by lazy {
         sendTv.clicks().doOnNext {
-            Log.d("QK-COMPOSE", "sendTvClick textBlank=${message.text.isNullOrBlank()}")
             pendingFocusNewestSentMessage = true
         }
     }
@@ -215,6 +221,14 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     private var currentAttachments: List<Attachment> = emptyList()
     private val ensureComposeFocusRunnable = Runnable {
         if (isFinishing || isDestroyed) return@Runnable
+
+        if (hasPendingMediaRestore()) {
+            if (message.isFocused) {
+                message.clearFocus()
+            }
+            messageList.requestFocus()
+            return@Runnable
+        }
 
         val focused = currentFocus
         if (focused != null && isDescendantOf(contentView, focused)) {
@@ -259,13 +273,8 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     private lateinit var binding: ComposeActivityBinding
     private var composeSearchMode = false
     private var draftBeforeSearch = ""
-    private var lastRecipientSummaryLog = ""
 
     private fun triggerSend(source: String): Boolean {
-        Log.d(
-            "QK-COMPOSE",
-            "sendTrigger source=$source enabled=${sendTv.isEnabled} textBlank=${message.text.isNullOrBlank()}"
-        )
         pendingFocusNewestSentMessage = true
         sendTv.performClick()
         return true
@@ -345,6 +354,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         messageList.setHasFixedSize(true)
         messageList.setItemViewCacheSize(4)
         (messageList.layoutManager as? LinearLayoutManager)?.isItemPrefetchEnabled = false
+        preparePendingMediaRestoreFocus()
         attachments.adapter = attachmentAdapter
         attachments.setHasFixedSize(true)
 
@@ -382,7 +392,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 if (itemId == R.id.info || itemId == R.id.call || itemId == R.id.schedule_message) {
                     pendingForceComposeFocusOnResume = true
                 }
-            }
+        }
 
         message.supportsInputContent = true
         message.setOnFocusChangeListener { _, hasFocus ->
@@ -550,12 +560,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 "To: ${state.selectedChips.joinToString(", ") { it.getDisplayName() }}"
             else -> ""
         }
-        val recipientSummaryLog =
-            "editing=${state.editingMode} chips=${state.selectedChips.map { it.address }} summary=$recipientSummaryText"
-        if (lastRecipientSummaryLog != recipientSummaryLog) {
-            lastRecipientSummaryLog = recipientSummaryLog
-            Log.d("QK-COMPOSE", "renderRecipients $recipientSummaryLog")
-        }
         if (recipientSummary.text?.toString() != recipientSummaryText) {
             recipientSummary.text = recipientSummaryText
         }
@@ -630,8 +634,21 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         val latestMessage = state.messages?.second?.lastOrNull()
         val latestMessageId = latestMessage?.id
         val latestMessageChanged = latestMessageId != lastRenderedLatestMessageId
+        val pendingMediaRestoreMessageId = pendingMediaRestoreMessages[state.threadId]
+        if (pendingMediaRestoreMessageId != null && lastFocusedMessageId == null) {
+            lastFocusedMessageId = pendingMediaRestoreMessageId
+        }
+        val shouldRestoreMediaMessage =
+            pendingMediaRestoreMessageId != null &&
+                state.messages?.second?.any { message -> message.id == pendingMediaRestoreMessageId } == true
         val shouldPositionInitialMessages =
-            latestMessage != null && initialMessageLayoutThreadId != state.threadId
+            latestMessage != null &&
+                initialMessageLayoutThreadId != state.threadId &&
+                !shouldRestoreMediaMessage
+
+        if (pendingMediaRestoreMessageId != null) {
+            preparePendingMediaRestoreFocus()
+        }
 
         // Updated: feed data through the adapter's API
         messageAdapter.threadData = state.messages
@@ -642,7 +659,15 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             lastRenderedLatestMessageId = latestMessageId
         }
 
-        if (shouldPositionInitialMessages) {
+        if (shouldRestoreMediaMessage) {
+            initialMessageLayoutThreadId = state.threadId
+            pendingMediaRestoreMessages.remove(state.threadId)
+            if (message.isFocused) {
+                message.clearFocus()
+                messageList.requestFocus()
+            }
+            restoreLastFocusedMessageIfVisible()
+        } else if (shouldPositionInitialMessages) {
             initialMessageLayoutThreadId = state.threadId
             scrollLatestMessageIntoView()
             messageList.postDelayed({ scrollLatestMessageIntoView() }, 150)
@@ -652,7 +677,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             if (latestMessage != null && latestMessage.isMe()) {
                 pendingFocusNewestSentMessage = false
                 lastFocusedMessageId = latestMessage.id
-                Log.d("QK-COMPOSE", "scrollLatestSentMessage id=${latestMessage.id} sending=${latestMessage.isSending()}")
                 scrollLatestMessageIntoView()
                 messageList.postDelayed({ scrollLatestMessageIntoView() }, 150)
             }
@@ -665,8 +689,14 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             scheduledGroup.isVisible = scheduledVisible
         }
         val scheduledTimestamp = dateFormatter.getScheduledTimestamp(state.scheduled)
-        if (scheduledTime.text?.toString() != scheduledTimestamp) {
-            scheduledTime.text = scheduledTimestamp
+        val scheduledText = when (state.scheduledRepeatInterval) {
+            ScheduledMessage.REPEAT_DAILY -> "$scheduledTimestamp - ${getString(R.string.compose_repeat_daily)}"
+            ScheduledMessage.REPEAT_WEEKLY -> "$scheduledTimestamp - ${getString(R.string.compose_repeat_weekly)}"
+            ScheduledMessage.REPEAT_MONTHLY -> "$scheduledTimestamp - ${getString(R.string.compose_repeat_monthly)}"
+            else -> scheduledTimestamp
+        }
+        if (scheduledTime.text?.toString() != scheduledText) {
+            scheduledTime.text = scheduledText
         }
 
         val attachmentsVisible = state.attachments.isNotEmpty()
@@ -801,10 +831,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         val serialized =
             HashMap(chips.associate { chip -> chip.address to chip.contact?.lookupKey })
         val forwardMode = intent.extras?.getBoolean("forward_mode", false) ?: false
-        Log.d(
-            "QK-COMPOSE",
-            "showContacts sharing=$sharing forwardMode=$forwardMode singleRecipient=$singleRecipient chips=${serialized.keys}"
-        )
         val intent = Intent(this, ContactsActivity::class.java).putExtra(
             ContactsActivity.SharingKey, sharing && !forwardMode
         ).putExtra(ContactsActivity.ChipsKey, serialized)
@@ -813,7 +839,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     }
 
     override fun showSelectedRecipients(chips: List<Recipient>) {
-        Log.d("QK-COMPOSE", "showSelectedRecipients ignored chips=${chips.map { it.address }}")
     }
 
     override fun themeChanged() {
@@ -891,7 +916,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         val camcorderProfile: CamcorderProfile = try {
             CamcorderProfile.get(0)
         } catch (e: RuntimeException) {
-            // Log.e(TAG, "RuntimeException caught while getting camera info", e)
             null
         } ?: return 0
         val j2: Long = j * 8 / (camcorderProfile.audioBitRate + camcorderProfile.videoBitRate)
@@ -933,6 +957,32 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).type = "vnd.android.cursor.dir/video"
 
         startActivityForResult(Intent.createChooser(intent, null), AttachVideoRequestCode)
+    }
+
+    override fun requestFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+
+        startActivityForResult(Intent.createChooser(intent, null), AttachFileRequestCode)
+    }
+
+    override fun startSpeechRecognition() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, getString(R.string.compose_speech_to_text))
+
+        try {
+            startActivityForResult(intent, SpeechRecognitionRequestCode)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.compose_speech_to_text_unavailable, Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun setDraft(draft: String) {
@@ -984,6 +1034,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     override fun onResume() {
         super.onResume()
+        preparePendingMediaRestoreFocus()
         Timber.d(
             "ComposeActivity onResume threadId=%s focus=%s pendingForce=%s pendingRestore=%s hasWindowFocus=%s",
             currentThreadId,
@@ -1012,6 +1063,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             currentFocus?.javaClass?.simpleName ?: "null"
         )
         if (hasFocus) {
+            preparePendingMediaRestoreFocus()
             ensureComposeFocus()
         }
     }
@@ -1025,6 +1077,16 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         return super.getColoredMenuItems() + R.id.call
     }
 
+    private fun persistReadPermissionIfPossible(uri: Uri, flags: Int) {
+        if (flags and Intent.FLAG_GRANT_READ_URI_PERMISSION == 0) return
+
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         when {
@@ -1032,12 +1094,10 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 val chips = data?.getSerializableExtra(ContactsActivity.ChipsKey)
                     ?.let { serializable -> serializable as? HashMap<String, String?> }
                     ?: hashMapOf()
-                Log.d("QK-COMPOSE", "contactsResult chips=${chips.keys}")
                 chipsSelectedIntent.onNext(chips)
             }
 
             requestCode == SelectContactRequestCode && chipsAdapter.data.isNullOrEmpty() -> {
-                Log.d("QK-COMPOSE", "contactsResult cancelled emptyChips=true")
                 chipsSelectedIntent.onNext(hashMapOf())
             }
 
@@ -1074,6 +1134,20 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                     ?: data?.data?.let(videoSelectedIntent::onNext)
             }
 
+            requestCode == AttachFileRequestCode && resultCode == Activity.RESULT_OK -> {
+                val flags = data?.flags ?: 0
+                data?.clipData?.itemCount?.let { count -> 0 until count }
+                    ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
+                    ?.forEach { uri ->
+                        persistReadPermissionIfPossible(uri, flags)
+                        fileSelectedIntent.onNext(uri)
+                    }
+                    ?: data?.data?.let { uri ->
+                        persistReadPermissionIfPossible(uri, flags)
+                        fileSelectedIntent.onNext(uri)
+                    }
+            }
+
             requestCode == RecordVideoRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.clipData?.itemCount?.let { count -> 0 until count }
                     ?.mapNotNull { i -> data.clipData?.getItemAt(i)?.uri }
@@ -1087,7 +1161,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
             requestCode == DateTimePickerRequestCode && resultCode == Activity.RESULT_OK -> {
                 data?.let {
-                    scheduleSelectedIntent.onNext(
+                    showScheduleRepeatDialog(
                         it.getLongExtra(
                             DateTimePickerActivity.TIME_IN_MILLS,
                             System.currentTimeMillis()
@@ -1096,8 +1170,42 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 }
             }
 
+            requestCode == SpeechRecognitionRequestCode && resultCode == Activity.RESULT_OK -> {
+                val spokenText = data
+                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                    ?.firstOrNull()
+                spokenText?.let(::appendDraftText)
+            }
+
             else -> super.onActivityResult(requestCode, resultCode, data)
         }
+    }
+
+    private fun showScheduleRepeatDialog(date: Long) {
+        val labels = arrayOf(
+            getString(R.string.compose_repeat_none),
+            getString(R.string.compose_repeat_daily),
+            getString(R.string.compose_repeat_weekly),
+            getString(R.string.compose_repeat_monthly)
+        )
+        val values = intArrayOf(
+            ScheduledMessage.REPEAT_NONE,
+            ScheduledMessage.REPEAT_DAILY,
+            ScheduledMessage.REPEAT_WEEKLY,
+            ScheduledMessage.REPEAT_MONTHLY
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.compose_repeat_title)
+            .setItems(labels) { _, which ->
+                scheduleSelectedIntent.onNext(ComposeView.ScheduledOptions(date, values[which]))
+            }
+            .setOnCancelListener {
+                scheduleSelectedIntent.onNext(
+                    ComposeView.ScheduledOptions(date, ScheduledMessage.REPEAT_NONE)
+                )
+            }
+            .show()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1592,16 +1700,47 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
 
     private fun rememberMessageByIdForRestore(messageId: Long): Boolean {
         lastFocusedMessageId = messageId
+        if (messageHasMediaPart(messageId)) {
+            rememberPendingMediaRestore(messageId)
+        }
         return true
     }
 
     private fun rememberMessageForPartRestore(partId: Long): Boolean {
-        val messageId = messageAdapter.data
+        val message = messageAdapter.data
             ?.firstOrNull { message -> message.parts.any { part -> part.id == partId } }
-            ?.id
             ?: return false
 
-        return rememberMessageByIdForRestore(messageId)
+        lastFocusedMessageId = message.id
+        if (message.parts.any { part -> part.id == partId && (part.isImage() || part.isVideo()) }) {
+            rememberPendingMediaRestore(message.id)
+        }
+        return true
+    }
+
+    private fun messageHasMediaPart(messageId: Long): Boolean {
+        return messageAdapter.data
+            ?.firstOrNull { message -> message.id == messageId }
+            ?.parts
+            ?.any { part -> part.isImage() || part.isVideo() } == true
+    }
+
+    private fun rememberPendingMediaRestore(messageId: Long) {
+        if (currentThreadId == 0L) return
+        pendingMediaRestoreMessages[currentThreadId] = messageId
+    }
+
+    private fun hasPendingMediaRestore(): Boolean {
+        return pendingMediaRestoreMessages.containsKey(currentThreadId)
+    }
+
+    private fun preparePendingMediaRestoreFocus(): Boolean {
+        if (!hasPendingMediaRestore()) return false
+        if (message.isFocused) {
+            message.clearFocus()
+        }
+        messageList.requestFocus()
+        return true
     }
 
     private fun restoreLastFocusedMessageIfVisible() {
@@ -1619,9 +1758,15 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
                 return@post
             }
 
-            lm.scrollToPositionWithOffset(position, 0)
+            lm.scrollToPositionWithOffset(position, (messageList.height / 2).coerceAtLeast(messageList.paddingTop))
             messageList.post restoreFocus@{
-                val itemView = lm.findViewByPosition(position) ?: return@restoreFocus
+                val itemView = lm.findViewByPosition(position) ?: run {
+                    messageList.scrollToPosition(position)
+                    messageList.postDelayed({
+                        lm.findViewByPosition(position)?.let(::requestFocusWithinMessageItem)
+                    }, 80)
+                    return@restoreFocus
+                }
                 requestFocusWithinMessageItem(itemView)
             }
         }
@@ -1838,7 +1983,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     override fun initSecondMenu() {
         showCompactMenu(
             R.string.compose_attach_cd,
-            listOf(R.id.photo_menu, R.id.audio_menu, R.id.video_menu, R.id.attach_contact)
+            listOf(R.id.photo_menu, R.id.audio_menu, R.id.video_menu, R.id.attach_file, R.id.attach_contact)
         )
     }
 
@@ -1847,7 +1992,11 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         if (hasMultipleRecipientsForMenu) {
             items += R.id.view_recipients
         }
-        items += listOf(R.id.search, R.id.schedule_message, R.id.call, R.id.info)
+        items += R.id.search
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            items += R.id.speech_to_text
+        }
+        items += listOf(R.id.schedule_message, R.id.call, R.id.info)
         showCompactMenu(R.string.drawer_more, items)
     }
 
@@ -1897,13 +2046,13 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         val labels = itemIds.map(::compactMenuLabel)
         listView.adapter = ArrayAdapter(this, R.layout.options_dialog_list_item, labels)
         listView.setOnItemClickListener { _, _, position, _ ->
-            if (itemIds[position] == R.id.add) {
-                forceExpandedRecipientsEditor = true
-            }
-            if (itemIds[position] == R.id.search) {
-                enterComposeSearchMode()
-            } else {
-                optionsItemIntent.onNext(itemIds[position])
+            when (itemIds[position]) {
+                R.id.add -> {
+                    forceExpandedRecipientsEditor = true
+                    optionsItemIntent.onNext(itemIds[position])
+                }
+                R.id.search -> enterComposeSearchMode()
+                else -> optionsItemIntent.onNext(itemIds[position])
             }
             dialog.dismiss()
         }
@@ -2057,6 +2206,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         R.id.photo_menu -> getString(R.string.compose_gallery_cd)
         R.id.audio_menu -> getString(R.string.compose_audio_cd)
         R.id.video_menu -> getString(R.string.compose_video_cd)
+        R.id.attach_file -> getString(R.string.compose_file_cd)
         R.id.attach_contact -> getString(R.string.compose_contact_cd)
         R.id.take_photo -> getString(R.string.compose_camera_cd)
         R.id.attach_photo -> getString(R.string.compose_gallery_cd)
@@ -2066,6 +2216,7 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
         R.id.attach_video -> getString(R.string.compose_video_cd)
         R.id.view_recipients -> getString(R.string.menu_view_recipients)
         R.id.schedule_message -> getString(R.string.compose_schedule_cd)
+        R.id.speech_to_text -> getString(R.string.compose_speech_to_text)
         R.id.call -> getString(R.string.menu_call)
         R.id.info -> getString(R.string.info_title)
         else -> itemId.toString()
@@ -2094,20 +2245,90 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
     }
 
     override fun showContactsDialog(contacts: MutableList<String>) {
-        val adapter: ArrayAdapter<String> =
-            ArrayAdapter(this, android.R.layout.simple_list_item_1, contacts)
+        val choices = contacts.map { value -> ContactChoice(value, findNameForLinkedValue(value)) }
+        val adapter = object : ArrayAdapter<ContactChoice>(this, android.R.layout.simple_list_item_2, choices) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val view = convertView ?: layoutInflater.inflate(android.R.layout.simple_list_item_2, parent, false)
+                val choice = getItem(position) ?: return view
+                val title = view.findViewById<TextView>(android.R.id.text1)
+                val subtitle = view.findViewById<TextView>(android.R.id.text2)
+
+                title.text = choice.value
+                subtitle.text = choice.name ?: ""
+                subtitle.visibility = if (choice.name.isNullOrBlank()) View.GONE else View.VISIBLE
+                return view
+            }
+        }
 
         AlertDialog.Builder(this)
             .setTitle("Select")
             .setAdapter(adapter) { _, position ->
-                val contact = contacts[position]
-
-                onLinkClicked(contact)
+                onLinkClicked(choices[position].value)
             }
 
             .setNegativeButton("Cancel", null)
 
             .show()
+    }
+
+    private data class ContactChoice(val value: String, val name: String?)
+
+    private fun findNameForLinkedValue(value: String): String? {
+        if (!android.util.Patterns.PHONE.matcher(value).matches()) return null
+        return findAndroidContactName(value) ?: findHeimishDirectoryName(value)
+    }
+
+    private fun findAndroidContactName(phoneNumber: String): String? {
+        return try {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(phoneNumber)
+            )
+            contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup.DISPLAY_NAME)
+                if (cursor.moveToFirst()) cursor.getString(nameIndex)?.takeIf { it.isNotBlank() } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun findHeimishDirectoryName(phoneNumber: String): String? {
+        val target = phoneKey(phoneNumber) ?: return null
+        return try {
+            contentResolver.query(
+                HEIMISH_DIRECTORY_CONTACTS_URI,
+                arrayOf("phone", "name"),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val phoneIndex = cursor.getColumnIndexOrThrow("phone")
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                while (cursor.moveToNext()) {
+                    val phone = cursor.getString(phoneIndex) ?: continue
+                    val key = phoneKey(phone) ?: continue
+                    if (key == target) {
+                        return@use cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
+                    }
+                }
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun phoneKey(phoneNumber: String): String? {
+        val digits = phoneNumber.filter(Char::isDigit)
+        val normalized = if (digits.length == 11 && digits.startsWith("1")) digits.drop(1) else digits
+        return normalized.takeIf { it.length >= 7 }?.takeLast(10)
     }
 
     override fun showRecipientsDialog(recipients: List<Recipient>) {
@@ -2185,7 +2406,6 @@ class ComposeActivity : QkThemedActivity(), ComposeView {
             if (restoreFocus) {
                 pendingRestoreMessageFocusOnResume = true
             }
-            Log.d("QK-MSGOPT", "action=$action selection=$selectedMessageIds")
             val optionAction = ComposeView.MessageOptionAction(itemId, selectedMessageIds)
             messageOptionsSelectionIntent.onNext(selectedMessageIds)
             clearSelection()

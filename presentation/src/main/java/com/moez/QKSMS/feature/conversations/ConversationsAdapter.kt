@@ -144,7 +144,12 @@ class ConversationsAdapter @Inject constructor(
         holder.pinned.isVisible = conversation.pinned
         val muted = notificationManager.isConversationMuted(conversation.id)
         holder.containerView.findViewById<android.view.View>(R.id.muted).isVisible = muted
-        holder.unread.imageTintList = ColorStateList.valueOf(theme)
+        holder.unread.isVisible = conversation.unreadCount > 0
+        holder.unread.text = when {
+            conversation.unreadCount > 99 -> "99+"
+            else -> conversation.unreadCount.toString()
+        }
+        holder.unread.backgroundTintList = ColorStateList.valueOf(theme)
     }
 
     override fun getItemId(position: Int): Long {

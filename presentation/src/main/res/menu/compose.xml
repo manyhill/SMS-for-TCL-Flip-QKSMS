@@ -109,6 +109,12 @@
         android:visible="false"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/speech_to_text"
+        android:title="@string/compose_speech_to_text"
+        android:visible="false"
+        app:showAsAction="never" />
+
   <item
         android:id="@+id/save"
         android:icon="@drawable/ic_clear_black_24dp"

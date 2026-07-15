@@ -21,10 +21,14 @@ package com.moez.QKSMS.feature.compose
 import android.animation.ObjectAnimator
 import android.content.Context
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
+import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.text.Layout
 import android.text.Spannable
 import android.text.SpannableString
+import android.text.SpannableStringBuilder
 import android.text.style.BackgroundColorSpan
 import android.text.style.StyleSpan
 import android.view.LayoutInflater
@@ -61,6 +65,7 @@ import com.moez.QKSMS.feature.compose.part.PartsAdapter
 import com.moez.QKSMS.model.Conversation
 import com.moez.QKSMS.model.Message
 import com.moez.QKSMS.model.Recipient
+import com.moez.QKSMS.repository.ContactRepository
 import com.moez.QKSMS.util.PhoneNumberUtils
 import com.moez.QKSMS.util.Preferences
 import io.reactivex.subjects.PublishSubject
@@ -86,6 +91,7 @@ class MessagesAdapter @Inject constructor(
     subscriptionManager: SubscriptionManagerCompat,
     private val context: Context,
     private val colors: Colors,
+    private val contactRepo: ContactRepository,
     private val dateFormatter: DateFormatter,
     private val partsAdapterProvider: Provider<PartsAdapter>,
     private val phoneNumberUtils: PhoneNumberUtils,
@@ -97,15 +103,21 @@ class MessagesAdapter @Inject constructor(
         private const val VIEW_TYPE_MESSAGE_IN = 0
         private const val VIEW_TYPE_MESSAGE_OUT = 1
         private const val MESSAGE_TEXT_CACHE_MAX = 160
+        private const val CONTACT_NUMBER_MATCH_DIGITS = 7
+        private const val SMARTLIST_ACCOUNT_TYPE = "com.lionscribe.elist"
+        private const val SMARTLIST_ACCOUNT_NAME = "Smartlist"
+        private val FLIP_CALLER_ID_CONTACTS_URI = Uri.parse("content://com.belz.flipcallerid.contacts/contacts")
 
         // Thanks to Cory Kilger for this regex
         // https://gist.github.com/cmkilger/b8f7dba3e76244a84e7e
         private val EMOJI_REGEX = Regex(
             "^[\\s\\n\\r]*(?:(?:[\u00a9\u00ae\u203c\u2049\u2122\u2139\u2194-\u2199\u21a9-\u21aa\u231a-\u231b\u2328\u23cf\u23e9-\u23f3\u23f8-\u23fa\u24c2\u25aa-\u25ab\u25b6\u25c0\u25fb-\u25fe\u2600-\u2604\u260e\u2611\u2614-\u2615\u2618\u261d\u2620\u2622-\u2623\u2626\u262a\u262e-\u262f\u2638-\u263a\u2648-\u2653\u2660\u2663\u2665-\u2666\u2668\u267b\u267f\u2692-\u2694\u2696-\u2697\u2699\u269b-\u269c\u26a0-\u26a1\u26aa-\u26ab\u26b0-\u26b1\u26bd-\u26be\u26c4-\u26c5\u26c8\u26ce-\u26cf\u26d1\u26d3-\u26d4\u26e9-\u26ea\u26f0-\u26f5\u26f7-\u26fa\u26fd\u2702\u2705\u2708-\u270d\u270f\u2712\u2714\u2716\u271d\u2721\u2728\u2733-\u2734\u2744\u2747\u274c\u274e\u2753-\u2755\u2757\u2763-\u2764\u2795-\u2797\u27a1\u27b0\u27bf\u2934-\u2935\u2b05-\u2b07\u2b1b-\u2b1c\u2b50\u2b55\u3030\u303d\u3297\u3299\ud83c\udc04\ud83c\udccf\ud83c\udd70-\ud83c\udd71\ud83c\udd7e-\ud83c\udd7f\ud83c\udd8e\ud83c\udd91-\ud83c\udd9a\ud83c\ude01-\ud83c\ude02\ud83c\ude1a\ud83c\ude2f\ud83c\ude32-\ud83c\ude3a\ud83c\ude50-\ud83c\ude51\u200d\ud83c\udf00-\ud83d\uddff\ud83d\ude00-\ud83d\ude4f\ud83d\ude80-\ud83d\udeff\ud83e\udd00-\ud83e\uddff\udb40\udc20-\udb40\udc7f]|\u200d[\u2640\u2642]|[\ud83c\udde6-\ud83c\uddff]{2}|.[\u20e0\u20e3\ufe0f]+)+[\\s\\n\\r]*)+$"
         )
+        private val PHONE_TEXT_REGEX = Regex("\\+?[0-9][0-9 .()\\-]{5,}[0-9]")
     }
 
     private data class CancelProgressState(val messageId: Long, val targetTime: Long)
+    private data class ContactNumberMatch(val address: String, val name: String)
 
     private var lastFocusedView: View? = null
     var onLastItemFocused: (() -> Unit)? = null
@@ -152,6 +164,8 @@ class MessagesAdapter @Inject constructor(
         }
 
     private val contactCache = ContactCache()
+    private val contacts by lazy { contactRepo.getContacts() }
+    private var contactNumberIndex: Map<String, List<ContactNumberMatch>>? = null
     private val messageTextCache = object : LinkedHashMap<Long, CharSequence>(
         MESSAGE_TEXT_CACHE_MAX,
         0.75f,
@@ -407,7 +421,7 @@ class MessagesAdapter @Inject constructor(
             }
         )
 
-        holder.body.setTextIfChanged(highlightSearchMatches(messageText))
+        holder.body.setTextIfChanged(highlightSearchMatches(addContactNamesForNumbers(messageText)))
         holder.body.setVisibleIfChanged(message.isSms() || messageText.isNotBlank())
         val bubble = getBubble(
             emojiOnly = emojiOnly,
@@ -471,6 +485,148 @@ class MessagesAdapter @Inject constructor(
             start = source.indexOf(query, startIndex = end, ignoreCase = true)
         }
         return spannable
+    }
+
+    private fun addContactNamesForNumbers(text: CharSequence): CharSequence {
+        if (!prefs.showContactNamesForNumbers.get() || text.isBlank()) return text
+
+        val source = text.toString()
+        val matches = PHONE_TEXT_REGEX.findAll(source)
+            .mapNotNull { match ->
+                val number = match.value.trimPhoneCandidate()
+                val name = findContactNameForNumber(number) ?: return@mapNotNull null
+                match to name
+            }
+            .toList()
+
+        if (matches.isEmpty()) return text
+
+        var offset = 0
+        val builder = SpannableStringBuilder(text)
+        matches.forEach { (match, name) ->
+            val insert = " ($name)"
+            val start = match.range.last + 1 + offset
+            builder.insert(start, insert)
+            builder.setSpan(
+                StyleSpan(Typeface.BOLD),
+                start + 2,
+                start + insert.length - 1,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            offset += insert.length
+        }
+        return builder
+    }
+
+    private fun findContactNameForNumber(number: String): String? {
+        val key = contactNumberKey(number) ?: return null
+        return getContactNumberIndex()[key]
+            ?.firstOrNull { match -> phoneNumberUtils.compare(match.address, number) }
+            ?.name
+    }
+
+    private fun String.trimPhoneCandidate(): String {
+        return trim { char -> !char.isDigit() && char != '+' }
+    }
+
+    private fun getContactNumberIndex(): Map<String, List<ContactNumberMatch>> {
+        contactNumberIndex?.let { return it }
+
+        val index = mutableMapOf<String, MutableList<ContactNumberMatch>>()
+        contacts
+            .filter { contact -> contact.isValid }
+            .forEach { contact ->
+                val name = contact.name.takeIf { it.isNotBlank() } ?: return@forEach
+                contact.numbers
+                    .filter { number -> number.isValid && number.address.isNotBlank() }
+                    .forEach { number ->
+                        val key = contactNumberKey(number.address) ?: return@forEach
+                        index.getOrPut(key) { mutableListOf() }
+                            .add(ContactNumberMatch(number.address, name))
+                    }
+            }
+        addSmartlistContacts(index)
+        addFlipCallerIdContacts(index)
+
+        return index.also { contactNumberIndex = it }
+    }
+
+    private fun addSmartlistContacts(index: MutableMap<String, MutableList<ContactNumberMatch>>) {
+        val projection = arrayOf(
+            Phone.NUMBER,
+            Phone.DISPLAY_NAME
+        )
+        val selection = listOf(
+            "${ContactsContract.Data.MIMETYPE}=?",
+            "${ContactsContract.RawContacts.ACCOUNT_TYPE}=?",
+            "${ContactsContract.RawContacts.ACCOUNT_NAME}=?"
+        ).joinToString(" AND ")
+        val args = arrayOf(
+            Phone.CONTENT_ITEM_TYPE,
+            SMARTLIST_ACCOUNT_TYPE,
+            SMARTLIST_ACCOUNT_NAME
+        )
+
+        try {
+            context.contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                projection,
+                selection,
+                args,
+                null
+            )?.use { cursor ->
+                val numberIndex = cursor.getColumnIndexOrThrow(Phone.NUMBER)
+                val nameIndex = cursor.getColumnIndexOrThrow(Phone.DISPLAY_NAME)
+
+                while (cursor.moveToNext()) {
+                    val address = cursor.getString(numberIndex)?.takeIf { it.isNotBlank() } ?: continue
+                    val name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() } ?: continue
+                    val key = contactNumberKey(address) ?: continue
+                    val matches = index.getOrPut(key) { mutableListOf() }
+                    if (matches.none { it.address == address && it.name == name }) {
+                        matches.add(ContactNumberMatch(address, name))
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Smartlist may be absent, disabled, or stored differently on some devices.
+        }
+    }
+
+    private fun addFlipCallerIdContacts(index: MutableMap<String, MutableList<ContactNumberMatch>>) {
+        val projection = arrayOf("phone", "name")
+
+        try {
+            context.contentResolver.query(
+                FLIP_CALLER_ID_CONTACTS_URI,
+                projection,
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val numberIndex = cursor.getColumnIndexOrThrow("phone")
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+
+                while (cursor.moveToNext()) {
+                    val address = cursor.getString(numberIndex)?.takeIf { it.isNotBlank() } ?: continue
+                    val name = cursor.getString(nameIndex)?.takeIf { it.isNotBlank() } ?: continue
+                    val key = contactNumberKey(address) ?: continue
+                    val matches = index.getOrPut(key) { mutableListOf() }
+                    if (matches.none { it.address == address && it.name == name }) {
+                        matches.add(ContactNumberMatch(address, name))
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Belz Caller ID may be absent or not yet installed on some devices.
+        }
+    }
+
+    private fun contactNumberKey(number: String): String? {
+        val digits = number.filter(Char::isDigit)
+        return digits
+            .takeIf { it.length >= CONTACT_NUMBER_MATCH_DIGITS }
+            ?.takeLast(CONTACT_NUMBER_MATCH_DIGITS)
     }
 
     override fun onViewRecycled(holder: QkViewHolder) {

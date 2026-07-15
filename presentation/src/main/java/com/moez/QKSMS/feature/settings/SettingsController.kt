@@ -117,7 +117,7 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
         sendDelayDialog.adapter.setData(R.array.delayed_sending_labels)
         mmsSizeDialog.adapter.setData(R.array.mms_sizes, R.array.mms_sizes_ids)
 
-        about.summary =    context.getString(R.string.settings_version, BuildConfig.VERSION_NAME)
+        about.summary = context.getString(R.string.settings_version, BuildConfig.VERSION_NAME)
     }
 
     override fun onAttach(view: View) {
@@ -175,6 +175,8 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
         signature.summary = state.signature.takeIf { it.isNotBlank() }
                 ?: context.getString(R.string.settings_signature_summary)
 
+        showContactNamesForNumbers.checkbox.isChecked = state.showContactNamesForNumbers
+
         textSize.summary = state.textSizeSummary
         textSizeDialog.adapter.selectedItem = state.textSizeId
 
@@ -215,9 +217,7 @@ class SettingsController : QkController<SettingsView, SettingsState, SettingsPre
                 setActionTextColor(colors.theme().theme)
                 show()
             }
-                  }
-    //   Logger.( parent.toString(), Toast.LENGTH_LONG).show()
-
+        }
     }
 
     // TODO change this to a PopupWindow
